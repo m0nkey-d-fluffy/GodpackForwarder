@@ -1,10 +1,10 @@
-# GodpackForwarder Plugin for BetterDiscord
+# GodpackForwarder Plugin
 
 **Author:** m0nkey.d.fluffy **Version:** 1.0.1
 
 ## Description
 
-GodpackForwarder is a utility plugin for BetterDiscord. It actively listens for all new messages and specifically targets those from the bot **Dreama** (User ID: `1334630845574676520`).
+GodpackForwarder is a utility plugin for BetterDiscord. It actively listens for all new messages and specifically targets those from the bot **Dreama**.
 
 If a message from this bot contains an `@everyone` ping (either in the text or within an embed), the plugin will instantly forward the full contents of that message (including text and embed details) as a new, clean text message to a private channel of your choice.
 
