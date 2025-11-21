@@ -369,12 +369,26 @@ function GodpackForwarder(meta) {
             channelInput.type = "text";
             channelInput.value = currentSettings.forwardChannelId || "";
             channelInput.placeholder = "Enter Discord Channel ID";
-            channelInput.style.width = "100%";
-            channelInput.style.padding = "8px";
-            channelInput.style.borderRadius = "4px";
-            channelInput.style.border = "1px solid var(--background-tertiary)";
-            channelInput.style.backgroundColor = "var(--background-secondary)";
-            channelInput.style.color = "var(--text-normal)";
+            channelInput.style.cssText = `
+                width: 100%;
+                padding: 8px;
+                border-radius: 4px;
+                border: 1px solid var(--background-tertiary);
+                background-color: var(--background-secondary);
+                color: var(--text-normal) !important;
+                font-family: inherit;
+                font-size: 14px;
+                -webkit-text-fill-color: var(--text-normal);
+            `;
+
+            // Handle focus state
+            channelInput.addEventListener("focus", () => {
+                channelInput.style.borderColor = "var(--brand-experiment)";
+            });
+            channelInput.addEventListener("blur", () => {
+                channelInput.style.borderColor = "var(--background-tertiary)";
+            });
+
             channelGroup.appendChild(channelInput);
 
             const channelHelp = document.createElement("p");
@@ -392,6 +406,7 @@ function GodpackForwarder(meta) {
             infoBox.style.backgroundColor = "var(--background-secondary)";
             infoBox.style.borderRadius = "4px";
             infoBox.style.marginBottom = "20px";
+            infoBox.style.color = "var(--text-normal)";
             infoBox.innerHTML = `
                 <strong>📌 Important:</strong><br>
                 • The forward channel must be in a different server than where the bot is running.<br>
