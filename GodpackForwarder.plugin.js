@@ -109,37 +109,19 @@ function GodpackForwarder(meta) {
     };
 
     /**
-     * Forwards the specified message with embeds to the configured channel.
-     * @param {object} originalMessage The original message object from Discord.
-     * @param {string} sourceChannelId The channel ID where the message originated.
+     * Forwards the specified message with extracted embed content to the configured channel.
+     * @param {string} messageContent The formatted message content to forward.
      */
-    const forwardMessage = (originalMessage, sourceChannelId) => {
+    const forwardMessage = (messageContent) => {
         if (!_sendMessage || !currentSettings.forwardChannelId) {
             log("Cannot forward message: Send Message module unavailable or forwardChannelId not set.", "warn");
             return;
         }
 
-        if (!_channelStore) {
-            log("Cannot forward message: Channel Store module unavailable.", "warn");
-            return;
-        }
-
         try {
-            // Blacklist check: Don't forward if the forward channel is in the same server as the source
-            const sourceChannel = _channelStore.getChannel(sourceChannelId);
-            const forwardChannel = _channelStore.getChannel(currentSettings.forwardChannelId);
-
-            if (sourceChannel && forwardChannel && sourceChannel.guild_id && forwardChannel.guild_id) {
-                if (sourceChannel.guild_id === forwardChannel.guild_id) {
-                    log(`Skipping forward: Forward channel is in the same server (${sourceChannel.guild_id}) as the source message.`, "warn");
-                    return;
-                }
-            }
-
-            // Build the forwarded message with the whole embed
+            // Use the simple, stable message object
             const messageData = {
-                content: `🔔 **Godpack Ping Detected!** 🔔\n**From Channel:** <#${sourceChannelId}>\n--------------------\n${originalMessage.content || ""}`,
-                embeds: originalMessage.embeds || [],
+                content: messageContent,
                 tts: false,
                 invalidEmojis: [],
                 validNonShortcutEmojis: []
@@ -152,6 +134,67 @@ function GodpackForwarder(meta) {
             log(`Error forwarding message: ${error.message}`, "error");
             console.error("Full error object during forwardMessage:", error);
         }
+    };
+
+    /**
+     * Extracts text from a ping message and forwards it.
+     * @param {object} message The message object from the dispatcher.
+     */
+    const parseAndForwardPing = (message) => {
+        log(`Godpack ping detected in channel ${message.channel_id}! Parsing and forwarding...`, "info");
+
+        // Server blacklist check
+        if (_channelStore) {
+            const sourceChannel = _channelStore.getChannel(message.channel_id);
+            const forwardChannel = _channelStore.getChannel(currentSettings.forwardChannelId);
+
+            if (sourceChannel && forwardChannel && sourceChannel.guild_id && forwardChannel.guild_id) {
+                if (sourceChannel.guild_id === forwardChannel.guild_id) {
+                    log(`Skipping forward: Forward channel is in the same server (${sourceChannel.guild_id}) as the source message.`, "warn");
+                    return;
+                }
+            }
+        }
+
+        // Build an array of lines and join with \n to prevent double-spacing.
+        const lines = [];
+
+        // Build the header
+        lines.push(`🔔 **Godpack Ping Detected!** 🔔`);
+        lines.push(`**From Channel:** <#${message.channel_id}>`);
+        lines.push(`--------------------`);
+
+        // Add the original @everyone text
+        if (message.content) {
+            lines.push(message.content);
+        }
+
+        // Extract text from the embed
+        if (message.embeds && message.embeds.length > 0) {
+            const embed = message.embeds[0]; // Get the first embed
+
+            if (embed.title) {
+                lines.push(`**${embed.title}**`);
+            }
+            if (embed.description) {
+                // The description already contains newlines, so just add it directly.
+                lines.push(embed.description);
+            }
+            if (embed.fields && embed.fields.length > 0) {
+                for (const field of embed.fields) {
+                    lines.push(`**${field.name}**`);
+                    lines.push(field.value);
+                }
+            }
+            if (embed.image && embed.image.url) {
+                // Add a blank line for spacing before the image link
+                lines.push(``);
+                lines.push(embed.image.url);
+            }
+        }
+
+        // Forward the newly constructed text string, joined by single newlines
+        forwardMessage(lines.join("\n"));
     };
 
 
@@ -196,10 +239,9 @@ function GodpackForwarder(meta) {
                 }
             }
 
-            // If @everyone was found anywhere, forward the whole message with embeds
+            // If @everyone was found anywhere, parse and forward
             if (hasEveryone) {
-                log(`Godpack ping detected in channel ${message.channel_id}! Forwarding with full embeds...`, "info");
-                forwardMessage(message, message.channel_id);
+                parseAndForwardPing(message);
             }
         } catch (e) {
             log(`Error in onMessageReceived: ${e.message}`, "error");
@@ -346,6 +388,21 @@ function GodpackForwarder(meta) {
             panel.style.padding = "20px";
             panel.style.color = "var(--text-normal)";
 
+            // Add a style element to force input styling
+            const style = document.createElement("style");
+            style.textContent = `
+                .godpack-input {
+                    color: var(--text-normal) !important;
+                    -webkit-text-fill-color: var(--text-normal) !important;
+                    opacity: 1 !important;
+                }
+                .godpack-input::placeholder {
+                    color: var(--text-muted) !important;
+                    opacity: 0.6 !important;
+                }
+            `;
+            document.head.appendChild(style);
+
             // Title
             const title = document.createElement("h2");
             title.textContent = "GodpackForwarder Settings";
@@ -367,6 +424,7 @@ function GodpackForwarder(meta) {
 
             const channelInput = document.createElement("input");
             channelInput.type = "text";
+            channelInput.className = "godpack-input";
             channelInput.value = currentSettings.forwardChannelId || "";
             channelInput.placeholder = "Enter Discord Channel ID";
             channelInput.style.cssText = `
@@ -375,10 +433,8 @@ function GodpackForwarder(meta) {
                 border-radius: 4px;
                 border: 1px solid var(--background-tertiary);
                 background-color: var(--background-secondary);
-                color: var(--text-normal) !important;
                 font-family: inherit;
                 font-size: 14px;
-                -webkit-text-fill-color: var(--text-normal);
             `;
 
             // Handle focus state
@@ -402,18 +458,20 @@ function GodpackForwarder(meta) {
 
             // Info Box
             const infoBox = document.createElement("div");
-            infoBox.style.padding = "12px";
-            infoBox.style.backgroundColor = "var(--background-secondary)";
-            infoBox.style.borderRadius = "4px";
-            infoBox.style.marginBottom = "20px";
-            infoBox.style.color = "var(--text-normal)";
-            infoBox.innerHTML = `
-                <strong>📌 Important:</strong><br>
-                • The forward channel must be in a different server than where the bot is running.<br>
-                • Messages from servers where the forward channel is located will be blocked automatically.
+            infoBox.style.cssText = `
+                padding: 12px;
+                background-color: var(--background-secondary);
+                border-radius: 4px;
+                margin-bottom: 20px;
+                color: var(--text-normal);
+                font-size: 13px;
+                line-height: 1.6;
             `;
-            infoBox.style.fontSize = "13px";
-            infoBox.style.lineHeight = "1.6";
+            infoBox.innerHTML = `
+                <strong style="color: var(--text-normal);">📌 Important:</strong><br>
+                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where the bot is running.</span><br>
+                <span style="color: var(--text-normal);">• Messages from servers where the forward channel is located will be blocked automatically.</span>
+            `;
             panel.appendChild(infoBox);
 
             // Save Button
