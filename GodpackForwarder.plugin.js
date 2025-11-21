@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.1
+ * @version 1.1.0
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -39,8 +39,9 @@ function GodpackForwarder(meta) {
     };
 
     // --- Internal State ---
-    let _dispatcher = null; 
-    let _sendMessage = null; 
+    let _dispatcher = null;
+    let _sendMessage = null;
+    let _channelStore = null;
     let _modulesLoaded = false;
 
     // --- SETTINGS MANAGEMENT (via config.json) ---
@@ -68,6 +69,15 @@ function GodpackForwarder(meta) {
                 log(`Failed to read or parse config file: ${e.message}`, "error");
                 currentSettings = { ...defaultSettings };
             }
+        }
+    };
+
+    const saveConfig = () => {
+        try {
+            fs.writeFileSync(configPath, JSON.stringify(currentSettings, null, 4));
+            log("Config file saved successfully.", "info");
+        } catch (e) {
+            log(`Failed to save config file: ${e.message}`, "error");
         }
     };
 
@@ -99,24 +109,42 @@ function GodpackForwarder(meta) {
     };
 
     /**
-     * Forwards the specified message content to the configured channel.
-     * @param {string} messageContent The message content to forward.
+     * Forwards the specified message with embeds to the configured channel.
+     * @param {object} originalMessage The original message object from Discord.
+     * @param {string} sourceChannelId The channel ID where the message originated.
      */
-    const forwardMessage = (messageContent) => {
+    const forwardMessage = (originalMessage, sourceChannelId) => {
         if (!_sendMessage || !currentSettings.forwardChannelId) {
             log("Cannot forward message: Send Message module unavailable or forwardChannelId not set.", "warn");
             return;
         }
-        
+
+        if (!_channelStore) {
+            log("Cannot forward message: Channel Store module unavailable.", "warn");
+            return;
+        }
+
         try {
-            // Use the simple, stable message object
-            const messageData = { 
-                content: messageContent, 
+            // Blacklist check: Don't forward if the forward channel is in the same server as the source
+            const sourceChannel = _channelStore.getChannel(sourceChannelId);
+            const forwardChannel = _channelStore.getChannel(currentSettings.forwardChannelId);
+
+            if (sourceChannel && forwardChannel && sourceChannel.guild_id && forwardChannel.guild_id) {
+                if (sourceChannel.guild_id === forwardChannel.guild_id) {
+                    log(`Skipping forward: Forward channel is in the same server (${sourceChannel.guild_id}) as the source message.`, "warn");
+                    return;
+                }
+            }
+
+            // Build the forwarded message with the whole embed
+            const messageData = {
+                content: `🔔 **Godpack Ping Detected!** 🔔\n**From Channel:** <#${sourceChannelId}>\n--------------------\n${originalMessage.content || ""}`,
+                embeds: originalMessage.embeds || [],
                 tts: false,
                 invalidEmojis: [],
                 validNonShortcutEmojis: []
             };
-            
+
             // Use the 4-argument call signature
             _sendMessage(currentSettings.forwardChannelId, messageData, undefined, {});
             log(`Successfully forwarded message to channel ${currentSettings.forwardChannelId}.`, "info");
@@ -128,48 +156,6 @@ function GodpackForwarder(meta) {
 
 
     // --- MESSAGE LISTENER LOGIC ---
-    
-    /**
-     * Extracts text from a ping message and forwards it.
-     * @param {object} message The message object from the dispatcher.
-     */
-    const parseAndForwardPing = (message) => {
-        log(`Godpack ping detected in channel ${message.channel_id}! Parsing and forwarding...`, "info");
-        
-        // Build an array of lines and join with \n to prevent double-spacing.
-        const lines = [];
-        
-        // Build the header
-        lines.push(`🔔 **Godpack Ping Detected!** 🔔`);
-        lines.push(`**From Channel:** <#${message.channel_id}>`);
-        lines.push(`--------------------`);
-        
-        // Add the original @everyone text
-        if (message.content) {
-            lines.push(message.content);
-        }
-        
-        // Extract text from the embed
-        if (message.embeds && message.embeds.length > 0) {
-            const embed = message.embeds[0]; // Get the first embed
-            
-            if (embed.title) {
-                lines.push(`**${embed.title}**`);
-            }
-            if (embed.description) {
-                // The description already contains newlines, so just add it directly.
-                lines.push(embed.description);
-            }
-            if (embed.image && embed.image.url) {
-                // Add a blank line for spacing before the image link
-                lines.push(``); 
-                lines.push(`**Image:** ${embed.image.url}`);
-            }
-        }
-        
-        // Forward the newly constructed text string, joined by single newlines
-        forwardMessage(lines.join("\n"));
-    };
 
     /**
      * This function is called by the Dispatcher patch on every new message.
@@ -181,7 +167,7 @@ function GodpackForwarder(meta) {
             if (!message || message.author?.id !== CONFIG.BOT_USER_ID) return;
 
             let hasEveryone = false;
-            
+
             // Filter 2: Check text content
             if (message.content && typeof message.content === 'string' && message.content.includes("@everyone")) {
                 hasEveryone = true;
@@ -210,9 +196,10 @@ function GodpackForwarder(meta) {
                 }
             }
 
-            // If @everyone was found anywhere, parse the content and forward it
+            // If @everyone was found anywhere, forward the whole message with embeds
             if (hasEveryone) {
-                parseAndForwardPing(message);
+                log(`Godpack ping detected in channel ${message.channel_id}! Forwarding with full embeds...`, "info");
+                forwardMessage(message, message.channel_id);
             }
         } catch (e) {
             log(`Error in onMessageReceived: ${e.message}`, "error");
@@ -264,15 +251,34 @@ function GodpackForwarder(meta) {
             log("Attempting to find Send Message module (legacy)...");
             // Use a simple, stable filter
             const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("sendMessage", "receiveMessage"));
-            
+
             _sendMessage = mod.sendMessage;
             if (!_sendMessage) throw new Error("Could not find sendMessage function.");
-            
+
             log(`SUCCESS: Found simple Send Message module.`, "info");
 
         } catch (error) {
             log(`Failed to load Send Message module: ${error.message}`, "error");
             _sendMessage = null;
+        }
+    };
+
+    /**
+     * Finds Discord's Channel Store module.
+     */
+    const loadChannelStore = async () => {
+        try {
+            log("Attempting to find Channel Store module...");
+            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("getChannel", "hasChannel"));
+
+            _channelStore = mod;
+            if (!_channelStore) throw new Error("Could not find Channel Store module.");
+
+            log(`SUCCESS: Found Channel Store module.`, "info");
+
+        } catch (error) {
+            log(`Failed to load Channel Store module: ${error.message}`, "error");
+            _channelStore = null;
         }
     };
 
@@ -283,9 +289,10 @@ function GodpackForwarder(meta) {
     const loadModules = async () => {
         await loadDispatcherPatch();
         await loadSendMessageModule();
-        
+        await loadChannelStore();
+
         // Check if critical modules were loaded
-        return _dispatcher && _sendMessage;
+        return _dispatcher && _sendMessage && _channelStore;
     };
 
 
@@ -297,10 +304,10 @@ function GodpackForwarder(meta) {
             meta.name = "GodpackForwarder";
             loadConfig(); // Load configuration from file
             log(`Plugin started (v${meta.version}).`, "info");
-            
+
             // Log configuration status
             if (!currentSettings.forwardChannelId) {
-                log("forwardChannelId is not set in GodpackForwarder.config.json. Notifications will be disabled.", "warn");
+                log("forwardChannelId is not set. Notifications will be disabled.", "warn");
             } else {
                 log(`Godpack pings will be forwarded to channel: ${currentSettings.forwardChannelId}`, "info");
             }
@@ -312,16 +319,9 @@ function GodpackForwarder(meta) {
                     showToast("GodpackForwarder: Critical modules failed. Notifications disabled.", "error");
                     return;
                 }
-                
+
                 _modulesLoaded = true;
                 log("Modules loaded. Listening for Godpack pings...", "info");
-
-                // Send a test notification on first run if channel is set
-                if (currentSettings.forwardChannelId) {
-                    log("First run: Sending test notification to configured channel.", "info");
-                    const testMessage = `✅ **GodpackForwarder Plugin (v${meta.version})**\n\nThe plugin has successfully loaded and is now monitoring for @everyone pings from Dreama.`;
-                    forwardMessage(testMessage);
-                }
             });
         },
 
@@ -331,13 +331,100 @@ function GodpackForwarder(meta) {
                  BdApi.Patcher.unpatchAll(meta.name, _dispatcher);
             }
             BdApi.Patcher.unpatchAll(meta.name);
-            
+
             // Clear module references
             _dispatcher = null;
-            _sendMessage = null; 
+            _sendMessage = null;
+            _channelStore = null;
             _modulesLoaded = false;
             log("Plugin stopped. Listeners removed.", "info");
             showToast("GodpackForwarder stopped.", "info");
+        },
+
+        getSettingsPanel: () => {
+            const panel = document.createElement("div");
+            panel.style.padding = "20px";
+            panel.style.color = "var(--text-normal)";
+
+            // Title
+            const title = document.createElement("h2");
+            title.textContent = "GodpackForwarder Settings";
+            title.style.marginBottom = "20px";
+            title.style.color = "var(--header-primary)";
+            panel.appendChild(title);
+
+            // Forward Channel ID Setting
+            const channelGroup = document.createElement("div");
+            channelGroup.style.marginBottom = "20px";
+
+            const channelLabel = document.createElement("label");
+            channelLabel.textContent = "Forward Channel ID:";
+            channelLabel.style.display = "block";
+            channelLabel.style.marginBottom = "8px";
+            channelLabel.style.fontWeight = "bold";
+            channelGroup.appendChild(channelLabel);
+
+            const channelInput = document.createElement("input");
+            channelInput.type = "text";
+            channelInput.value = currentSettings.forwardChannelId || "";
+            channelInput.placeholder = "Enter Discord Channel ID";
+            channelInput.style.width = "100%";
+            channelInput.style.padding = "8px";
+            channelInput.style.borderRadius = "4px";
+            channelInput.style.border = "1px solid var(--background-tertiary)";
+            channelInput.style.backgroundColor = "var(--background-secondary)";
+            channelInput.style.color = "var(--text-normal)";
+            channelGroup.appendChild(channelInput);
+
+            const channelHelp = document.createElement("p");
+            channelHelp.textContent = "The channel ID where godpack pings will be forwarded. Right-click a channel and select 'Copy ID' to get the channel ID.";
+            channelHelp.style.marginTop = "5px";
+            channelHelp.style.fontSize = "12px";
+            channelHelp.style.color = "var(--text-muted)";
+            channelGroup.appendChild(channelHelp);
+
+            panel.appendChild(channelGroup);
+
+            // Info Box
+            const infoBox = document.createElement("div");
+            infoBox.style.padding = "12px";
+            infoBox.style.backgroundColor = "var(--background-secondary)";
+            infoBox.style.borderRadius = "4px";
+            infoBox.style.marginBottom = "20px";
+            infoBox.innerHTML = `
+                <strong>📌 Important:</strong><br>
+                • The forward channel must be in a different server than where the bot is running.<br>
+                • Messages from servers where the forward channel is located will be blocked automatically.
+            `;
+            infoBox.style.fontSize = "13px";
+            infoBox.style.lineHeight = "1.6";
+            panel.appendChild(infoBox);
+
+            // Save Button
+            const saveButton = document.createElement("button");
+            saveButton.textContent = "Save Settings";
+            saveButton.style.padding = "10px 20px";
+            saveButton.style.backgroundColor = "var(--brand-experiment)";
+            saveButton.style.color = "white";
+            saveButton.style.border = "none";
+            saveButton.style.borderRadius = "4px";
+            saveButton.style.cursor = "pointer";
+            saveButton.style.fontWeight = "bold";
+            saveButton.style.fontSize = "14px";
+
+            saveButton.addEventListener("click", () => {
+                const newChannelId = channelInput.value.trim();
+
+                currentSettings.forwardChannelId = newChannelId;
+                saveConfig();
+
+                showToast("GodpackForwarder settings saved!", "success");
+                log(`Settings saved: forwardChannelId = ${newChannelId}`, "info");
+            });
+
+            panel.appendChild(saveButton);
+
+            return panel;
         }
     };
 }
