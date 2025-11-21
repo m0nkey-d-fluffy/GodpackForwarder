@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.1.0
+ * @version 1.0.2
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
