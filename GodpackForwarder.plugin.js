@@ -362,6 +362,7 @@ function GodpackForwarder(meta) {
             channelLabel.style.display = "block";
             channelLabel.style.marginBottom = "8px";
             channelLabel.style.fontWeight = "bold";
+            channelLabel.style.color = "var(--header-primary)";
             channelGroup.appendChild(channelLabel);
 
             const channelInput = document.createElement("input");
