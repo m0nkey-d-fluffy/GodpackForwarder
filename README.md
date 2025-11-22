@@ -1,14 +1,16 @@
 # GodpackForwarder Plugin
 
-**Author:** m0nkey.d.fluffy **Version:** 1.0.2
+**Author:** m0nkey.d.fluffy **Version:** 1.0.3
 
 ## Description
 
 GodpackForwarder is a utility plugin for BetterDiscord. It actively listens for all new messages and specifically targets those from the bot **Dreama**.
 
-If a message from this bot contains an `@everyone` ping (either in the text or within an embed), the plugin will instantly forward the complete message with its full rich embeds to a private channel of your choice.
+If a message from this bot contains an `@everyone` ping (either in the text or within an embed), the plugin will instantly forward the message content (including extracted embed text and images) to a private channel of your choice.
 
 This allows you to receive Godpack notifications in a dedicated channel without having to mute or manage pings in the main server. The plugin automatically prevents forwarding when the forward channel is in the same server as the bot.
+
+**New in v1.0.3:** The plugin can now catch up on missed messages! If you were offline or had the plugin disabled, it will automatically forward any missed @everyone pings from Dreama when you start up.
 
 ## Installation
 
@@ -35,7 +37,11 @@ This plugin can be configured either through the BetterDiscord settings UI or by
 
 3.  In the settings panel:
 
-    -   Enter your **Forward Channel ID** in the text field.
+    -   Enter your **Forward Channel ID** - where notifications will be sent.
+
+    -   Enter your **Monitor Channel IDs** - channels where Dreama posts (for catching up on missed messages).
+
+    -   Toggle **Catch up on missed messages at startup** to enable/disable the catch-up feature.
 
     -   Click **Save Settings**.
 
@@ -58,19 +64,30 @@ When you enable **GodpackForwarder** for the first time, it will automatically c
 
     ```
     {
-        "forwardChannelId": ""
+        "forwardChannelId": "",
+        "monitorChannelIds": [],
+        "lastForwardedTimestamp": 0,
+        "catchUpOnStart": true
     }
     ```
 
-4.  Paste your copied Channel ID into the `forwardChannelId` field:
+4.  Fill in the configuration fields:
 
     **Example Config:**
 
     ```
     {
-        "forwardChannelId": "1234567890123456789"
+        "forwardChannelId": "1234567890123456789",
+        "monitorChannelIds": ["9876543210987654321", "1122334455667788990"],
+        "lastForwardedTimestamp": 0,
+        "catchUpOnStart": true
     }
     ```
+
+    - `forwardChannelId`: Where to forward notifications
+    - `monitorChannelIds`: Array of channel IDs where Dreama posts (for catch-up)
+    - `lastForwardedTimestamp`: Automatically updated by the plugin
+    - `catchUpOnStart`: Set to `true` to check for missed messages on startup
 
 ### Getting Your Channel ID
 
@@ -97,7 +114,9 @@ This is the complete logic the plugin follows.
 
 3.  **Logs Config Status:** It prints a (purple) message to your console telling you if the channel ID was loaded or if it's missing (disabling notifications).
 
-4.  **Module Loading:** The plugin calls `loadModules()` to find Discord's internal `Dispatcher` (for listening), `sendMessage` (for sending), and `ChannelStore` (for server checking).
+4.  **Module Loading:** The plugin calls `loadModules()` to find Discord's internal `Dispatcher` (for listening), `sendMessage` (for sending), `ChannelStore` (for server checking), and `MessageStore` (for catch-up).
+
+5.  **Catch-Up Check:** If catch-up is enabled and monitor channels are configured, the plugin checks Discord's cached messages for any missed @everyone pings from Dreama that are newer than the last forwarded message. These are forwarded in chronological order.
 
 ### 2. Live Operation (Listening for Pings)
 
@@ -113,10 +132,12 @@ This is the complete logic the plugin follows.
 
     -   **If different server:** The forwarding proceeds.
 
-5.  **Forwarding with Full Embeds:** If all checks pass:
+5.  **Forwarding:** If all checks pass:
 
-    -   The plugin logs (purple) "Godpack ping detected! Forwarding with full embeds..." to your console.
+    -   The plugin logs (purple) "Godpack ping detected! Parsing and forwarding..." to your console.
 
-    -   It calls `forwardMessage()` which sends the message with its complete Discord embeds intact, preserving all formatting, images, fields, and styling.
+    -   It extracts text content from the message and embeds (title, description, fields, image URLs).
 
-    -   A header is added indicating the source channel.
+    -   It sends a formatted text message to your configured forward channel with a header indicating the source.
+
+    -   The `lastForwardedTimestamp` is updated to track which messages have been forwarded.
