@@ -490,41 +490,9 @@ function GodpackForwarder(meta) {
                 if (messagesArray.length === 0) {
                     log(`No cached messages for thread ${thread.id}, fetching via API...`, "info");
                     try {
-                        // Try multiple methods to get the auth token
-                        let token = null;
-
-                        // Method 1: AuthenticationStore
-                        const AuthStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getToken", "getEmail"));
-                        if (AuthStore?.getToken) {
-                            token = AuthStore.getToken();
-                            log(`Got token via AuthStore`, "info");
-                        }
-
-                        // Method 2: Try finding via different filter
-                        if (!token) {
-                            const tokenModule = BdApi.Webpack.getModule(m => m.getToken && typeof m.getToken === 'function' && m.getToken.length === 0);
-                            if (tokenModule?.getToken) {
-                                token = tokenModule.getToken();
-                                log(`Got token via tokenModule`, "info");
-                            }
-                        }
-
-                        // Method 3: webpackChunkdiscord_app
-                        if (!token && typeof webpackChunkdiscord_app !== 'undefined') {
-                            let wpRequire;
-                            webpackChunkdiscord_app.push([[''], {}, (e) => { wpRequire = e; }]);
-                            const modules = wpRequire.c;
-                            for (const id in modules) {
-                                const mod = modules[id]?.exports;
-                                if (mod?.default?.getToken || mod?.getToken) {
-                                    token = mod?.default?.getToken?.() || mod?.getToken?.();
-                                    if (token) {
-                                        log(`Got token via webpack modules`, "info");
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+                        // Get token using the method from AlwaysNotify plugin
+                        const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps('token'), { searchExports: true });
+                        const token = TokenModule?.token;
 
                         if (token) {
                             const response = await fetch(`https://discord.com/api/v9/channels/${thread.id}/messages?limit=50`, {
