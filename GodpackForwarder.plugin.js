@@ -36,6 +36,7 @@ function GodpackForwarder(meta) {
     // --- CONFIGURATION ---
     const CONFIG = {
         BOT_USER_ID: "1334630845574676520", // User ID of the Dreama bot to monitor.
+        DREAMA_SERVER_ID: "1334603881652555896", // Server ID where Dreama operates.
     };
 
     // --- Internal State ---
@@ -400,7 +401,7 @@ function GodpackForwarder(meta) {
             return;
         }
 
-        log("Scanning all cached channels for missed Dreama @everyone pings...", "info");
+        log(`Scanning Dreama server (${CONFIG.DREAMA_SERVER_ID}) for missed @everyone pings...`, "info");
 
         const missedMessages = [];
 
@@ -412,13 +413,6 @@ function GodpackForwarder(meta) {
                 return;
             }
 
-            // Get all guilds the user is in
-            const GuildStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getGuilds", "getGuild"));
-            if (!GuildStore) {
-                log("Could not find Guild Store module.", "error");
-                return;
-            }
-
             // Get all channels
             const ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getAllThreadsForParent"));
             if (!ChannelStore) {
@@ -426,46 +420,36 @@ function GodpackForwarder(meta) {
                 return;
             }
 
-            const guilds = GuildStore.getGuilds();
+            // Get all channels in the Dreama server
+            const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.DREAMA_SERVER_ID) || {});
             let channelsScanned = 0;
 
-            for (const guildId in guilds) {
-                // Skip the forward channel's guild (blacklist)
-                const forwardChannel = _channelStore?.getChannel(currentSettings.forwardChannelId);
-                if (forwardChannel && forwardChannel.guild_id === guildId) {
+            for (const channel of guildChannels) {
+                // Only check text channels (type 0) and announcement channels (type 5)
+                if (channel.type !== 0 && channel.type !== 5) continue;
+
+                const channelMessages = MessageStore.getMessages(channel.id);
+                if (!channelMessages || !channelMessages._array || channelMessages._array.length === 0) {
                     continue;
                 }
 
-                // Get all channels in this guild from the channel store
-                const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(guildId) || {});
+                channelsScanned++;
 
-                for (const channel of guildChannels) {
-                    // Only check text channels (type 0) and announcement channels (type 5)
-                    if (channel.type !== 0 && channel.type !== 5) continue;
+                // Filter messages from Dreama with @everyone that are newer than last forwarded
+                for (const msg of channelMessages._array) {
+                    const msgTimestamp = new Date(msg.timestamp).getTime();
 
-                    const channelMessages = MessageStore.getMessages(channel.id);
-                    if (!channelMessages || !channelMessages._array || channelMessages._array.length === 0) {
-                        continue;
-                    }
-
-                    channelsScanned++;
-
-                    // Filter messages from Dreama with @everyone that are newer than last forwarded
-                    for (const msg of channelMessages._array) {
-                        const msgTimestamp = new Date(msg.timestamp).getTime();
-
-                        if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
-                            missedMessages.push({
-                                message: msg,
-                                timestamp: msgTimestamp,
-                                channelId: channel.id
-                            });
-                        }
+                    if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
+                        missedMessages.push({
+                            message: msg,
+                            timestamp: msgTimestamp,
+                            channelId: channel.id
+                        });
                     }
                 }
             }
 
-            log(`Scanned ${channelsScanned} cached channel(s) for missed messages.`, "info");
+            log(`Scanned ${channelsScanned} cached channel(s) in Dreama server for missed messages.`, "info");
 
         } catch (error) {
             log(`Error scanning channels: ${error.message}`, "error");
@@ -677,9 +661,9 @@ function GodpackForwarder(meta) {
             `;
             infoBox.innerHTML = `
                 <strong style="color: var(--text-normal);">📌 Important:</strong><br>
-                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where the bot is running.</span><br>
-                <span style="color: var(--text-normal);">• Messages from servers where the forward channel is located will be blocked automatically.</span><br>
-                <span style="color: var(--text-normal);">• Catch-up automatically scans all channels you've viewed for missed Dreama pings.</span>
+                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where Dreama runs.</span><br>
+                <span style="color: var(--text-normal);">• Catch-up scans all channels in the Dreama server for missed @everyone pings.</span><br>
+                <span style="color: var(--text-normal);">• Channels must be recently viewed in Discord for catch-up to find messages.</span>
             `;
             panel.appendChild(infoBox);
 
