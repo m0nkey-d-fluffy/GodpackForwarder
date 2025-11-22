@@ -430,8 +430,25 @@ function GodpackForwarder(meta) {
                 const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
                 if (ActiveThreadsStore) {
                     const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+                    log(`ActiveThreads raw structure: ${JSON.stringify(activeThreads, null, 2)}`, "info");
                     if (activeThreads) {
-                        allThreads = Object.values(activeThreads).flat();
+                        // The structure is { parentChannelId: { threadId: threadObject } }
+                        // We need to extract the thread objects from the nested structure
+                        for (const parentChannelId of Object.keys(activeThreads)) {
+                            const threadsInParent = activeThreads[parentChannelId];
+                            log(`Parent channel ${parentChannelId} has threads: ${JSON.stringify(Object.keys(threadsInParent))}`, "info");
+                            for (const threadId of Object.keys(threadsInParent)) {
+                                const threadData = threadsInParent[threadId];
+                                log(`Thread ${threadId} data type: ${typeof threadData}, hasId: ${threadData?.id !== undefined}`, "info");
+                                // The thread object might be the value, or it might be nested further
+                                if (threadData && threadData.id) {
+                                    allThreads.push(threadData);
+                                } else if (typeof threadData === 'object') {
+                                    // Maybe the threadId IS the id and we need to construct the object
+                                    allThreads.push({ id: threadId, ...threadData });
+                                }
+                            }
+                        }
                         log(`Found ${allThreads.length} active threads in Dreama server.`, "info");
                     }
                 }
