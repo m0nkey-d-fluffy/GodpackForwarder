@@ -439,24 +439,27 @@ function GodpackForwarder(meta) {
                 log(`Could not get active threads: ${e.message}`, "warn");
             }
 
-            // Combine channels and threads
-            const allChannels = [...guildChannels, ...allThreads];
-            let channelsScanned = 0;
-            let channelsWithMessages = 0;
+            // Focus on threads since that's where Dreama posts
+            // Thread types: 10: ANNOUNCEMENT_THREAD, 11: PUBLIC_THREAD, 12: PRIVATE_THREAD
+            const threadTypes = [10, 11, 12];
+            let threadsScanned = 0;
+            let threadsWithMessages = 0;
 
-            // Valid channel types to scan:
-            // 0: GUILD_TEXT, 5: GUILD_ANNOUNCEMENT, 10: ANNOUNCEMENT_THREAD
-            // 11: PUBLIC_THREAD, 12: PRIVATE_THREAD, 15: GUILD_FORUM
-            const validTypes = [0, 5, 10, 11, 12, 15];
+            log(`Processing ${allThreads.length} thread(s)...`, "info");
 
-            for (const channel of allChannels) {
-                if (!validTypes.includes(channel.type)) continue;
+            for (const thread of allThreads) {
+                if (!thread || !thread.id) {
+                    log(`Skipping invalid thread object`, "warn");
+                    continue;
+                }
 
-                channelsScanned++;
-                const channelMessages = MessageStore.getMessages(channel.id);
+                log(`Checking thread ${thread.id} (${thread.name || 'unnamed'}, type ${thread.type})...`, "info");
+                threadsScanned++;
 
-                // Handle different message store formats
+                // First try to get cached messages
+                let channelMessages = MessageStore.getMessages(thread.id);
                 let messagesArray = [];
+
                 if (channelMessages) {
                     if (channelMessages._array) {
                         messagesArray = channelMessages._array;
@@ -467,27 +470,61 @@ function GodpackForwarder(meta) {
                     }
                 }
 
-                if (messagesArray.length === 0) continue;
+                // If no cached messages, try to fetch them
+                if (messagesArray.length === 0 && _messageActions) {
+                    log(`No cached messages for thread ${thread.id}, attempting to fetch...`, "info");
+                    try {
+                        // Fetch recent messages from the thread
+                        await _messageActions.fetchMessages({ channelId: thread.id, limit: 50 });
+                        // Wait a moment for the store to update
+                        await new Promise(resolve => setTimeout(resolve, 500));
 
-                channelsWithMessages++;
-                log(`Channel ${channel.id} (type ${channel.type}) has ${messagesArray.length} cached messages.`, "info");
+                        // Try to get messages again
+                        channelMessages = MessageStore.getMessages(thread.id);
+                        if (channelMessages) {
+                            if (channelMessages._array) {
+                                messagesArray = channelMessages._array;
+                            } else if (channelMessages.toArray) {
+                                messagesArray = channelMessages.toArray();
+                            } else if (Array.isArray(channelMessages)) {
+                                messagesArray = channelMessages;
+                            }
+                        }
+                        log(`After fetch: thread ${thread.id} now has ${messagesArray.length} messages.`, "info");
+                    } catch (fetchError) {
+                        log(`Failed to fetch messages for thread ${thread.id}: ${fetchError.message}`, "warn");
+                    }
+                }
+
+                if (messagesArray.length === 0) {
+                    log(`Thread ${thread.id} still has no messages after fetch attempt.`, "info");
+                    continue;
+                }
+
+                threadsWithMessages++;
+                log(`Thread ${thread.id} has ${messagesArray.length} messages to scan.`, "info");
 
                 // Filter messages from Dreama with @everyone that are newer than last forwarded
                 for (const msg of messagesArray) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
 
+                    // Log each message from Dreama for debugging
+                    if (msg.author?.id === CONFIG.BOT_USER_ID) {
+                        log(`Found Dreama message: ${msg.id}, timestamp: ${msgTimestamp}, lastForwarded: ${currentSettings.lastForwardedTimestamp}, hasEveryone: ${msg.content?.includes("@everyone") || false}`, "info");
+                    }
+
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
                         missedMessages.push({
                             message: msg,
                             timestamp: msgTimestamp,
-                            channelId: channel.id
+                            channelId: thread.id
                         });
-                        log(`Found missed message in channel ${channel.id} from ${new Date(msg.timestamp).toLocaleString()}`, "info");
+                        log(`Found missed message in thread ${thread.id} from ${new Date(msg.timestamp).toLocaleString()}`, "info");
                     }
                 }
             }
 
-            log(`Scanned ${channelsScanned} channel(s), ${channelsWithMessages} had cached messages.`, "info");
+            log(`Scanned ${threadsScanned} thread(s), ${threadsWithMessages} had messages.`, "info");
 
         } catch (error) {
             log(`Error scanning channels: ${error.message}`, "error");
