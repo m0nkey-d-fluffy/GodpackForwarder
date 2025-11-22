@@ -432,20 +432,19 @@ function GodpackForwarder(meta) {
                     const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
                     log(`ActiveThreads raw structure: ${JSON.stringify(activeThreads, null, 2)}`, "info");
                     if (activeThreads) {
-                        // The structure is { parentChannelId: { threadId: threadObject } }
-                        // We need to extract the thread objects from the nested structure
+                        // The structure is { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
+                        // We need to extract the channel objects from the nested structure
                         for (const parentChannelId of Object.keys(activeThreads)) {
                             const threadsInParent = activeThreads[parentChannelId];
                             log(`Parent channel ${parentChannelId} has threads: ${JSON.stringify(Object.keys(threadsInParent))}`, "info");
                             for (const threadId of Object.keys(threadsInParent)) {
                                 const threadData = threadsInParent[threadId];
-                                log(`Thread ${threadId} data type: ${typeof threadData}, hasId: ${threadData?.id !== undefined}`, "info");
-                                // The thread object might be the value, or it might be nested further
-                                if (threadData && threadData.id) {
-                                    allThreads.push(threadData);
-                                } else if (typeof threadData === 'object') {
-                                    // Maybe the threadId IS the id and we need to construct the object
-                                    allThreads.push({ id: threadId, ...threadData });
+                                // The actual channel object is in threadData.channel
+                                if (threadData && threadData.channel && threadData.channel.id) {
+                                    log(`Thread ${threadId}: found channel object with name "${threadData.channel.name}", type ${threadData.channel.type}`, "info");
+                                    allThreads.push(threadData.channel);
+                                } else {
+                                    log(`Thread ${threadId}: unexpected structure - ${JSON.stringify(Object.keys(threadData || {}))}`, "warn");
                                 }
                             }
                         }
@@ -490,15 +489,24 @@ function GodpackForwarder(meta) {
                 // If no cached messages, try to fetch them
                 if (messagesArray.length === 0 && _messageActions) {
                     log(`No cached messages for thread ${thread.id}, attempting to fetch...`, "info");
+                    log(`Available methods on _messageActions: ${Object.keys(_messageActions).join(", ")}`, "info");
                     try {
-                        // Fetch recent messages from the thread
-                        await _messageActions.fetchMessages({ channelId: thread.id, limit: 50 });
-                        // Wait a moment for the store to update
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        // Try different fetch methods
+                        let fetchResult;
+                        if (_messageActions.fetchMessages) {
+                            log(`Trying fetchMessages...`, "info");
+                            fetchResult = await _messageActions.fetchMessages({ channelId: thread.id, limit: 50 });
+                            log(`fetchMessages result: ${JSON.stringify(fetchResult)?.substring(0, 200)}`, "info");
+                        }
+
+                        // Wait for the store to update
+                        await new Promise(resolve => setTimeout(resolve, 1000));
 
                         // Try to get messages again
                         channelMessages = MessageStore.getMessages(thread.id);
+                        log(`MessageStore.getMessages(${thread.id}) returned: ${channelMessages ? 'object' : 'null/undefined'}`, "info");
                         if (channelMessages) {
+                            log(`channelMessages keys: ${Object.keys(channelMessages).join(", ")}`, "info");
                             if (channelMessages._array) {
                                 messagesArray = channelMessages._array;
                             } else if (channelMessages.toArray) {
