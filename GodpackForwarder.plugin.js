@@ -422,21 +422,58 @@ function GodpackForwarder(meta) {
 
             // Get all channels in the Dreama server
             const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.DREAMA_SERVER_ID) || {});
-            let channelsScanned = 0;
+            log(`Found ${guildChannels.length} channels in Dreama server.`, "info");
 
-            for (const channel of guildChannels) {
-                // Only check text channels (type 0) and announcement channels (type 5)
-                if (channel.type !== 0 && channel.type !== 5) continue;
-
-                const channelMessages = MessageStore.getMessages(channel.id);
-                if (!channelMessages || !channelMessages._array || channelMessages._array.length === 0) {
-                    continue;
+            // Also get active threads
+            let allThreads = [];
+            try {
+                const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+                if (ActiveThreadsStore) {
+                    const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+                    if (activeThreads) {
+                        allThreads = Object.values(activeThreads).flat();
+                        log(`Found ${allThreads.length} active threads in Dreama server.`, "info");
+                    }
                 }
+            } catch (e) {
+                log(`Could not get active threads: ${e.message}`, "warn");
+            }
+
+            // Combine channels and threads
+            const allChannels = [...guildChannels, ...allThreads];
+            let channelsScanned = 0;
+            let channelsWithMessages = 0;
+
+            // Valid channel types to scan:
+            // 0: GUILD_TEXT, 5: GUILD_ANNOUNCEMENT, 10: ANNOUNCEMENT_THREAD
+            // 11: PUBLIC_THREAD, 12: PRIVATE_THREAD, 15: GUILD_FORUM
+            const validTypes = [0, 5, 10, 11, 12, 15];
+
+            for (const channel of allChannels) {
+                if (!validTypes.includes(channel.type)) continue;
 
                 channelsScanned++;
+                const channelMessages = MessageStore.getMessages(channel.id);
+
+                // Handle different message store formats
+                let messagesArray = [];
+                if (channelMessages) {
+                    if (channelMessages._array) {
+                        messagesArray = channelMessages._array;
+                    } else if (channelMessages.toArray) {
+                        messagesArray = channelMessages.toArray();
+                    } else if (Array.isArray(channelMessages)) {
+                        messagesArray = channelMessages;
+                    }
+                }
+
+                if (messagesArray.length === 0) continue;
+
+                channelsWithMessages++;
+                log(`Channel ${channel.id} (type ${channel.type}) has ${messagesArray.length} cached messages.`, "info");
 
                 // Filter messages from Dreama with @everyone that are newer than last forwarded
-                for (const msg of channelMessages._array) {
+                for (const msg of messagesArray) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
@@ -445,11 +482,12 @@ function GodpackForwarder(meta) {
                             timestamp: msgTimestamp,
                             channelId: channel.id
                         });
+                        log(`Found missed message in channel ${channel.id} from ${new Date(msg.timestamp).toLocaleString()}`, "info");
                     }
                 }
             }
 
-            log(`Scanned ${channelsScanned} cached channel(s) in Dreama server for missed messages.`, "info");
+            log(`Scanned ${channelsScanned} channel(s), ${channelsWithMessages} had cached messages.`, "info");
 
         } catch (error) {
             log(`Error scanning channels: ${error.message}`, "error");
