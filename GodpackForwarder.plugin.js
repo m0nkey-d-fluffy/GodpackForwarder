@@ -486,36 +486,33 @@ function GodpackForwarder(meta) {
                     }
                 }
 
-                // If no cached messages, try to fetch them
-                if (messagesArray.length === 0 && _messageActions) {
-                    log(`No cached messages for thread ${thread.id}, attempting to fetch...`, "info");
-                    log(`Available methods on _messageActions: ${Object.keys(_messageActions).join(", ")}`, "info");
+                // If no cached messages, try to fetch them via Discord API directly
+                if (messagesArray.length === 0) {
+                    log(`No cached messages for thread ${thread.id}, fetching via API...`, "info");
                     try {
-                        // Try different fetch methods
-                        let fetchResult;
-                        if (_messageActions.fetchMessages) {
-                            log(`Trying fetchMessages...`, "info");
-                            fetchResult = await _messageActions.fetchMessages({ channelId: thread.id, limit: 50 });
-                            log(`fetchMessages result: ${JSON.stringify(fetchResult)?.substring(0, 200)}`, "info");
-                        }
+                        // Get the REST API module
+                        const APIModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getAPIBaseURL"));
+                        const token = BdApi.Webpack.getModule(m => m.default && m.default.getToken)?.default?.getToken?.()
+                            || BdApi.Webpack.getModule(m => m.getToken)?.getToken?.();
 
-                        // Wait for the store to update
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        if (token) {
+                            const response = await fetch(`https://discord.com/api/v9/channels/${thread.id}/messages?limit=50`, {
+                                headers: {
+                                    "Authorization": token,
+                                    "Content-Type": "application/json"
+                                }
+                            });
 
-                        // Try to get messages again
-                        channelMessages = MessageStore.getMessages(thread.id);
-                        log(`MessageStore.getMessages(${thread.id}) returned: ${channelMessages ? 'object' : 'null/undefined'}`, "info");
-                        if (channelMessages) {
-                            log(`channelMessages keys: ${Object.keys(channelMessages).join(", ")}`, "info");
-                            if (channelMessages._array) {
-                                messagesArray = channelMessages._array;
-                            } else if (channelMessages.toArray) {
-                                messagesArray = channelMessages.toArray();
-                            } else if (Array.isArray(channelMessages)) {
-                                messagesArray = channelMessages;
+                            if (response.ok) {
+                                const messages = await response.json();
+                                log(`API fetch returned ${messages.length} messages for thread ${thread.id}`, "info");
+                                messagesArray = messages;
+                            } else {
+                                log(`API fetch failed with status ${response.status}: ${response.statusText}`, "warn");
                             }
+                        } else {
+                            log(`Could not get auth token for API fetch`, "warn");
                         }
-                        log(`After fetch: thread ${thread.id} now has ${messagesArray.length} messages.`, "info");
                     } catch (fetchError) {
                         log(`Failed to fetch messages for thread ${thread.id}: ${fetchError.message}`, "warn");
                     }
@@ -535,7 +532,12 @@ function GodpackForwarder(meta) {
 
                     // Log each message from Dreama for debugging
                     if (msg.author?.id === CONFIG.BOT_USER_ID) {
-                        log(`Found Dreama message: ${msg.id}, timestamp: ${msgTimestamp}, lastForwarded: ${currentSettings.lastForwardedTimestamp}, hasEveryone: ${msg.content?.includes("@everyone") || false}`, "info");
+                        const embedDesc = msg.embeds?.[0]?.description || "(no embed)";
+                        const hasEveryoneInContent = msg.content?.includes("@everyone") || false;
+                        const hasEveryoneInEmbed = embedDesc.includes("@everyone");
+                        log(`Found Dreama message: ${msg.id}, timestamp: ${msgTimestamp}, lastForwarded: ${currentSettings.lastForwardedTimestamp}`, "info");
+                        log(`  -> content @everyone: ${hasEveryoneInContent}, embed @everyone: ${hasEveryoneInEmbed}`, "info");
+                        log(`  -> embed preview: ${embedDesc.substring(0, 100)}...`, "info");
                     }
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
