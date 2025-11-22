@@ -582,7 +582,7 @@ function GodpackForwarder(meta) {
             // Set plugin name for logging
             meta.name = "GodpackForwarder";
             loadConfig(); // Load configuration from file
-            log(`Plugin started (v${meta.version}).`, "info");
+            log(`Plugin started (v${meta.version}) - Thread-based catch-up build.`, "info");
 
             // Log configuration status
             if (!currentSettings.forwardChannelId) {
