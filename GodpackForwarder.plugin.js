@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.2
+ * @version 1.0.3
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -36,18 +36,22 @@ function GodpackForwarder(meta) {
     // --- CONFIGURATION ---
     const CONFIG = {
         BOT_USER_ID: "1334630845574676520", // User ID of the Dreama bot to monitor.
+        DREAMA_SERVER_ID: "1334603881652555896", // Server ID where Dreama operates.
     };
 
     // --- Internal State ---
     let _dispatcher = null;
     let _sendMessage = null;
     let _channelStore = null;
+    let _messageActions = null;
     let _modulesLoaded = false;
 
     // --- SETTINGS MANAGEMENT (via config.json) ---
     const configPath = path.join(BdApi.Plugins.folder, "GodpackForwarder.config.json");
     const defaultSettings = {
         forwardChannelId: "", // User-configured Channel ID to forward messages to.
+        lastForwardedTimestamp: 0, // Timestamp of the last forwarded message.
+        catchUpOnStart: true, // Whether to check for missed messages on startup.
     };
     let currentSettings = { ...defaultSettings };
 
@@ -195,6 +199,13 @@ function GodpackForwarder(meta) {
 
         // Forward the newly constructed text string, joined by single newlines
         forwardMessage(lines.join("\n"));
+
+        // Update last forwarded timestamp
+        const messageTimestamp = new Date(message.timestamp).getTime();
+        if (messageTimestamp > currentSettings.lastForwardedTimestamp) {
+            currentSettings.lastForwardedTimestamp = messageTimestamp;
+            saveConfig();
+        }
     };
 
 
@@ -325,6 +336,214 @@ function GodpackForwarder(meta) {
     };
 
     /**
+     * Finds Discord's Message Actions module for fetching message history.
+     */
+    const loadMessageActions = async () => {
+        try {
+            log("Attempting to find Message Actions module...");
+            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("fetchMessages", "sendMessage"));
+
+            _messageActions = mod;
+            if (!_messageActions) throw new Error("Could not find Message Actions module.");
+
+            log(`SUCCESS: Found Message Actions module.`, "info");
+
+        } catch (error) {
+            log(`Failed to load Message Actions module: ${error.message}`, "error");
+            _messageActions = null;
+        }
+    };
+
+    /**
+     * Checks if a message contains @everyone from Dreama.
+     * @param {object} message The message object.
+     * @returns {boolean} True if message matches criteria.
+     */
+    const isDreamaEveryonePing = (message) => {
+        if (!message || message.author?.id !== CONFIG.BOT_USER_ID) return false;
+
+        // Check text content
+        if (message.content && typeof message.content === 'string' && message.content.includes("@everyone")) {
+            return true;
+        }
+
+        // Check embed content
+        if (message.embeds && message.embeds.length > 0) {
+            for (const embed of message.embeds) {
+                if (embed.description && embed.description.includes("@everyone")) {
+                    return true;
+                }
+                if (embed.fields) {
+                    for (const field of embed.fields) {
+                        if ((field.name && field.name.includes("@everyone")) ||
+                            (field.value && field.value.includes("@everyone"))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
+    /**
+     * Checks for missed messages on startup and forwards them.
+     * Automatically scans all cached channels for Dreama @everyone pings.
+     */
+    const checkMissedMessages = async () => {
+        if (!currentSettings.catchUpOnStart) {
+            log("Catch-up on start is disabled. Skipping missed message check.", "info");
+            return;
+        }
+
+        if (!currentSettings.forwardChannelId) {
+            log("Forward channel not configured. Skipping missed message check.", "warn");
+            return;
+        }
+
+        log(`Scanning Dreama server (${CONFIG.DREAMA_SERVER_ID}) for missed @everyone pings...`, "info");
+
+        const missedMessages = [];
+
+        try {
+            // Get the Message Store module
+            const MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMessages", "getMessage"));
+            if (!MessageStore) {
+                log("Could not find Message Store module.", "error");
+                return;
+            }
+
+            // Get all channels
+            const ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getAllThreadsForParent"));
+            if (!ChannelStore) {
+                log("Could not find Channel Store module.", "error");
+                return;
+            }
+
+            // Get all channels in the Dreama server
+            const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.DREAMA_SERVER_ID) || {});
+
+            // Also get active threads
+            let allThreads = [];
+            try {
+                const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+                if (ActiveThreadsStore) {
+                    const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+                    if (activeThreads) {
+                        // The structure is { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
+                        for (const parentChannelId of Object.keys(activeThreads)) {
+                            const threadsInParent = activeThreads[parentChannelId];
+                            for (const threadId of Object.keys(threadsInParent)) {
+                                const threadData = threadsInParent[threadId];
+                                if (threadData && threadData.channel && threadData.channel.id) {
+                                    allThreads.push(threadData.channel);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                log(`Could not get active threads: ${e.message}`, "warn");
+            }
+
+            log(`Scanning ${allThreads.length} active thread(s) for missed messages...`, "info");
+
+            // Thread types: 10: ANNOUNCEMENT_THREAD, 11: PUBLIC_THREAD, 12: PRIVATE_THREAD
+            let threadsScanned = 0;
+            let threadsWithMessages = 0;
+
+            for (const thread of allThreads) {
+                if (!thread || !thread.id) continue;
+
+                threadsScanned++;
+
+                // First try to get cached messages
+                let channelMessages = MessageStore.getMessages(thread.id);
+                let messagesArray = [];
+
+                if (channelMessages) {
+                    if (channelMessages._array) {
+                        messagesArray = channelMessages._array;
+                    } else if (channelMessages.toArray) {
+                        messagesArray = channelMessages.toArray();
+                    } else if (Array.isArray(channelMessages)) {
+                        messagesArray = channelMessages;
+                    }
+                }
+
+                // If no cached messages, fetch via Discord API
+                if (messagesArray.length === 0) {
+                    try {
+                        const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps('token'), { searchExports: true });
+                        const token = TokenModule?.token;
+
+                        if (token) {
+                            const response = await fetch(`https://discord.com/api/v9/channels/${thread.id}/messages?limit=50`, {
+                                headers: {
+                                    "Authorization": token,
+                                    "Content-Type": "application/json"
+                                }
+                            });
+
+                            if (response.ok) {
+                                messagesArray = await response.json();
+                            }
+                        }
+                    } catch (fetchError) {
+                        log(`Failed to fetch messages for thread ${thread.id}: ${fetchError.message}`, "warn");
+                    }
+                }
+
+                if (messagesArray.length === 0) continue;
+
+                threadsWithMessages++;
+
+                // Filter messages from Dreama with @everyone that are newer than last forwarded
+                for (const msg of messagesArray) {
+                    const msgTimestamp = new Date(msg.timestamp).getTime();
+
+                    if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
+                        missedMessages.push({
+                            message: msg,
+                            timestamp: msgTimestamp,
+                            channelId: thread.id
+                        });
+                    }
+                }
+            }
+
+        } catch (error) {
+            log(`Error scanning channels: ${error.message}`, "error");
+            return;
+        }
+
+        if (missedMessages.length === 0) {
+            log("No missed messages found.", "info");
+            return;
+        }
+
+        // Sort by timestamp (oldest first)
+        missedMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+        log(`Found ${missedMessages.length} missed message(s). Forwarding...`, "info");
+        showToast(`GodpackForwarder: Forwarding ${missedMessages.length} missed message(s)...`, "info");
+
+        // Forward each message with a small delay to avoid rate limiting
+        for (let i = 0; i < missedMessages.length; i++) {
+            const { message } = missedMessages[i];
+            parseAndForwardPing(message);
+
+            // Small delay between messages to avoid rate limiting
+            if (i < missedMessages.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        log(`Forwarded ${missedMessages.length} missed message(s).`, "info");
+        showToast(`GodpackForwarder: Forwarded ${missedMessages.length} missed message(s)!`, "success");
+    };
+
+    /**
      * Orchestrates loading all modules.
      * @returns {Promise<boolean>} True if modules loaded.
      */
@@ -332,8 +551,9 @@ function GodpackForwarder(meta) {
         await loadDispatcherPatch();
         await loadSendMessageModule();
         await loadChannelStore();
+        await loadMessageActions();
 
-        // Check if critical modules were loaded
+        // Check if critical modules were loaded (messageActions is optional)
         return _dispatcher && _sendMessage && _channelStore;
     };
 
@@ -355,7 +575,7 @@ function GodpackForwarder(meta) {
             }
 
             // Load required modules
-            loadModules().then((success) => {
+            loadModules().then(async (success) => {
                 if (!success) {
                     log("Critical modules failed to load. Plugin will not function.", "error");
                     showToast("GodpackForwarder: Critical modules failed. Notifications disabled.", "error");
@@ -364,6 +584,9 @@ function GodpackForwarder(meta) {
 
                 _modulesLoaded = true;
                 log("Modules loaded. Listening for Godpack pings...", "info");
+
+                // Check for missed messages on startup
+                await checkMissedMessages();
             });
         },
 
@@ -378,6 +601,7 @@ function GodpackForwarder(meta) {
             _dispatcher = null;
             _sendMessage = null;
             _channelStore = null;
+            _messageActions = null;
             _modulesLoaded = false;
             log("Plugin stopped. Listeners removed.", "info");
             showToast("GodpackForwarder stopped.", "info");
@@ -456,6 +680,32 @@ function GodpackForwarder(meta) {
 
             panel.appendChild(channelGroup);
 
+            // Catch-up Toggle
+            const catchUpGroup = document.createElement("div");
+            catchUpGroup.style.marginBottom = "20px";
+            catchUpGroup.style.display = "flex";
+            catchUpGroup.style.alignItems = "center";
+            catchUpGroup.style.gap = "10px";
+
+            const catchUpCheckbox = document.createElement("input");
+            catchUpCheckbox.type = "checkbox";
+            catchUpCheckbox.id = "godpack-catchup";
+            catchUpCheckbox.checked = currentSettings.catchUpOnStart !== false;
+            catchUpCheckbox.style.width = "18px";
+            catchUpCheckbox.style.height = "18px";
+            catchUpCheckbox.style.cursor = "pointer";
+
+            const catchUpLabel = document.createElement("label");
+            catchUpLabel.htmlFor = "godpack-catchup";
+            catchUpLabel.textContent = "Catch up on missed messages at startup";
+            catchUpLabel.style.color = "var(--text-normal)";
+            catchUpLabel.style.cursor = "pointer";
+
+            catchUpGroup.appendChild(catchUpCheckbox);
+            catchUpGroup.appendChild(catchUpLabel);
+
+            panel.appendChild(catchUpGroup);
+
             // Info Box
             const infoBox = document.createElement("div");
             infoBox.style.cssText = `
@@ -469,8 +719,9 @@ function GodpackForwarder(meta) {
             `;
             infoBox.innerHTML = `
                 <strong style="color: var(--text-normal);">📌 Important:</strong><br>
-                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where the bot is running.</span><br>
-                <span style="color: var(--text-normal);">• Messages from servers where the forward channel is located will be blocked automatically.</span>
+                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where Dreama runs.</span><br>
+                <span style="color: var(--text-normal);">• Catch-up scans all channels in the Dreama server for missed @everyone pings.</span><br>
+                <span style="color: var(--text-normal);">• Channels must be recently viewed in Discord for catch-up to find messages.</span>
             `;
             panel.appendChild(infoBox);
 
@@ -488,12 +739,14 @@ function GodpackForwarder(meta) {
 
             saveButton.addEventListener("click", () => {
                 const newChannelId = channelInput.value.trim();
+                const catchUpEnabled = catchUpCheckbox.checked;
 
                 currentSettings.forwardChannelId = newChannelId;
+                currentSettings.catchUpOnStart = catchUpEnabled;
                 saveConfig();
 
                 showToast("GodpackForwarder settings saved!", "success");
-                log(`Settings saved: forwardChannelId = ${newChannelId}`, "info");
+                log(`Settings saved: forwardChannelId = ${newChannelId}, catchUpOnStart = ${catchUpEnabled}`, "info");
             });
 
             panel.appendChild(saveButton);
