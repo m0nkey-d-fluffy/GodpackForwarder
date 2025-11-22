@@ -10,7 +10,7 @@ If a message from this bot contains an `@everyone` ping (either in the text or w
 
 This allows you to receive Godpack notifications in a dedicated channel without having to mute or manage pings in the main server. The plugin automatically prevents forwarding when the forward channel is in the same server as the bot.
 
-**New in v1.0.3:** The plugin can now catch up on missed messages! If you were offline or had the plugin disabled, it will automatically forward any missed @everyone pings from Dreama when you start up.
+**New in v1.0.3:** The plugin can now catch up on missed messages! If you were offline or had the plugin disabled, it will automatically scan all your Discord channels for missed @everyone pings from Dreama and forward them in chronological order.
 
 ## Installation
 
@@ -39,9 +39,7 @@ This plugin can be configured either through the BetterDiscord settings UI or by
 
     -   Enter your **Forward Channel ID** - where notifications will be sent.
 
-    -   Enter your **Monitor Channel IDs** - channels where Dreama posts (for catching up on missed messages).
-
-    -   Toggle **Catch up on missed messages at startup** to enable/disable the catch-up feature.
+    -   Toggle **Catch up on missed messages at startup** to enable/disable the catch-up feature (automatically scans all channels).
 
     -   Click **Save Settings**.
 
@@ -65,7 +63,6 @@ When you enable **GodpackForwarder** for the first time, it will automatically c
     ```
     {
         "forwardChannelId": "",
-        "monitorChannelIds": [],
         "lastForwardedTimestamp": 0,
         "catchUpOnStart": true
     }
@@ -78,16 +75,14 @@ When you enable **GodpackForwarder** for the first time, it will automatically c
     ```
     {
         "forwardChannelId": "1234567890123456789",
-        "monitorChannelIds": ["9876543210987654321", "1122334455667788990"],
         "lastForwardedTimestamp": 0,
         "catchUpOnStart": true
     }
     ```
 
     - `forwardChannelId`: Where to forward notifications
-    - `monitorChannelIds`: Array of channel IDs where Dreama posts (for catch-up)
-    - `lastForwardedTimestamp`: Automatically updated by the plugin
-    - `catchUpOnStart`: Set to `true` to check for missed messages on startup
+    - `lastForwardedTimestamp`: Automatically updated by the plugin (tracks last forwarded message)
+    - `catchUpOnStart`: Set to `true` to automatically scan all channels for missed messages on startup
 
 ### Getting Your Channel ID
 
@@ -116,7 +111,7 @@ This is the complete logic the plugin follows.
 
 4.  **Module Loading:** The plugin calls `loadModules()` to find Discord's internal `Dispatcher` (for listening), `sendMessage` (for sending), `ChannelStore` (for server checking), and `MessageStore` (for catch-up).
 
-5.  **Catch-Up Check:** If catch-up is enabled and monitor channels are configured, the plugin checks Discord's cached messages for any missed @everyone pings from Dreama that are newer than the last forwarded message. These are forwarded in chronological order.
+5.  **Catch-Up Check:** If catch-up is enabled, the plugin automatically scans all cached channels across all your servers for any missed @everyone pings from Dreama that are newer than the last forwarded message. These are forwarded in chronological order.
 
 ### 2. Live Operation (Listening for Pings)
 
