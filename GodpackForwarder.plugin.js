@@ -422,7 +422,6 @@ function GodpackForwarder(meta) {
 
             // Get all channels in the Dreama server
             const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.DREAMA_SERVER_ID) || {});
-            log(`Found ${guildChannels.length} channels in Dreama server.`, "info");
 
             // Also get active threads
             let allThreads = [];
@@ -430,46 +429,32 @@ function GodpackForwarder(meta) {
                 const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
                 if (ActiveThreadsStore) {
                     const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
-                    log(`ActiveThreads raw structure: ${JSON.stringify(activeThreads, null, 2)}`, "info");
                     if (activeThreads) {
                         // The structure is { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
-                        // We need to extract the channel objects from the nested structure
                         for (const parentChannelId of Object.keys(activeThreads)) {
                             const threadsInParent = activeThreads[parentChannelId];
-                            log(`Parent channel ${parentChannelId} has threads: ${JSON.stringify(Object.keys(threadsInParent))}`, "info");
                             for (const threadId of Object.keys(threadsInParent)) {
                                 const threadData = threadsInParent[threadId];
-                                // The actual channel object is in threadData.channel
                                 if (threadData && threadData.channel && threadData.channel.id) {
-                                    log(`Thread ${threadId}: found channel object with name "${threadData.channel.name}", type ${threadData.channel.type}`, "info");
                                     allThreads.push(threadData.channel);
-                                } else {
-                                    log(`Thread ${threadId}: unexpected structure - ${JSON.stringify(Object.keys(threadData || {}))}`, "warn");
                                 }
                             }
                         }
-                        log(`Found ${allThreads.length} active threads in Dreama server.`, "info");
                     }
                 }
             } catch (e) {
                 log(`Could not get active threads: ${e.message}`, "warn");
             }
 
-            // Focus on threads since that's where Dreama posts
+            log(`Scanning ${allThreads.length} active thread(s) for missed messages...`, "info");
+
             // Thread types: 10: ANNOUNCEMENT_THREAD, 11: PUBLIC_THREAD, 12: PRIVATE_THREAD
-            const threadTypes = [10, 11, 12];
             let threadsScanned = 0;
             let threadsWithMessages = 0;
 
-            log(`Processing ${allThreads.length} thread(s)...`, "info");
-
             for (const thread of allThreads) {
-                if (!thread || !thread.id) {
-                    log(`Skipping invalid thread object`, "warn");
-                    continue;
-                }
+                if (!thread || !thread.id) continue;
 
-                log(`Checking thread ${thread.id} (${thread.name || 'unnamed'}, type ${thread.type})...`, "info");
                 threadsScanned++;
 
                 // First try to get cached messages
@@ -486,11 +471,9 @@ function GodpackForwarder(meta) {
                     }
                 }
 
-                // If no cached messages, try to fetch them via Discord API directly
+                // If no cached messages, fetch via Discord API
                 if (messagesArray.length === 0) {
-                    log(`No cached messages for thread ${thread.id}, fetching via API...`, "info");
                     try {
-                        // Get token using the method from AlwaysNotify plugin
                         const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps('token'), { searchExports: true });
                         const token = TokenModule?.token;
 
@@ -503,41 +486,21 @@ function GodpackForwarder(meta) {
                             });
 
                             if (response.ok) {
-                                const messages = await response.json();
-                                log(`API fetch returned ${messages.length} messages for thread ${thread.id}`, "info");
-                                messagesArray = messages;
-                            } else {
-                                log(`API fetch failed with status ${response.status}: ${response.statusText}`, "warn");
+                                messagesArray = await response.json();
                             }
-                        } else {
-                            log(`Could not get auth token for API fetch`, "warn");
                         }
                     } catch (fetchError) {
                         log(`Failed to fetch messages for thread ${thread.id}: ${fetchError.message}`, "warn");
                     }
                 }
 
-                if (messagesArray.length === 0) {
-                    log(`Thread ${thread.id} still has no messages after fetch attempt.`, "info");
-                    continue;
-                }
+                if (messagesArray.length === 0) continue;
 
                 threadsWithMessages++;
-                log(`Thread ${thread.id} has ${messagesArray.length} messages to scan.`, "info");
 
                 // Filter messages from Dreama with @everyone that are newer than last forwarded
                 for (const msg of messagesArray) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
-
-                    // Log each message from Dreama for debugging
-                    if (msg.author?.id === CONFIG.BOT_USER_ID) {
-                        const embedDesc = msg.embeds?.[0]?.description || "(no embed)";
-                        const hasEveryoneInContent = msg.content?.includes("@everyone") || false;
-                        const hasEveryoneInEmbed = embedDesc.includes("@everyone");
-                        log(`Found Dreama message: ${msg.id}, timestamp: ${msgTimestamp}, lastForwarded: ${currentSettings.lastForwardedTimestamp}`, "info");
-                        log(`  -> content @everyone: ${hasEveryoneInContent}, embed @everyone: ${hasEveryoneInEmbed}`, "info");
-                        log(`  -> embed preview: ${embedDesc.substring(0, 100)}...`, "info");
-                    }
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
                         missedMessages.push({
@@ -545,12 +508,9 @@ function GodpackForwarder(meta) {
                             timestamp: msgTimestamp,
                             channelId: thread.id
                         });
-                        log(`Found missed message in thread ${thread.id} from ${new Date(msg.timestamp).toLocaleString()}`, "info");
                     }
                 }
             }
-
-            log(`Scanned ${threadsScanned} thread(s), ${threadsWithMessages} had messages.`, "info");
 
         } catch (error) {
             log(`Error scanning channels: ${error.message}`, "error");
@@ -565,15 +525,12 @@ function GodpackForwarder(meta) {
         // Sort by timestamp (oldest first)
         missedMessages.sort((a, b) => a.timestamp - b.timestamp);
 
-        log(`Found ${missedMessages.length} missed message(s). Forwarding in chronological order...`, "info");
+        log(`Found ${missedMessages.length} missed message(s). Forwarding...`, "info");
         showToast(`GodpackForwarder: Forwarding ${missedMessages.length} missed message(s)...`, "info");
 
         // Forward each message with a small delay to avoid rate limiting
         for (let i = 0; i < missedMessages.length; i++) {
             const { message } = missedMessages[i];
-
-            log(`Forwarding missed message ${i + 1}/${missedMessages.length} from ${new Date(message.timestamp).toLocaleString()}`, "info");
-
             parseAndForwardPing(message);
 
             // Small delay between messages to avoid rate limiting
@@ -582,7 +539,7 @@ function GodpackForwarder(meta) {
             }
         }
 
-        log(`Finished forwarding ${missedMessages.length} missed message(s).`, "info");
+        log(`Forwarded ${missedMessages.length} missed message(s).`, "info");
         showToast(`GodpackForwarder: Forwarded ${missedMessages.length} missed message(s)!`, "success");
     };
 
@@ -608,7 +565,7 @@ function GodpackForwarder(meta) {
             // Set plugin name for logging
             meta.name = "GodpackForwarder";
             loadConfig(); // Load configuration from file
-            log(`Plugin started (v${meta.version}) - Thread-based catch-up build.`, "info");
+            log(`Plugin started (v${meta.version}).`, "info");
 
             // Log configuration status
             if (!currentSettings.forwardChannelId) {
