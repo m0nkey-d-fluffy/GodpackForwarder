@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.3
+ * @version 1.0.4
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -44,6 +44,7 @@ function GodpackForwarder(meta) {
     let _sendMessage = null;
     let _channelStore = null;
     let _messageActions = null;
+    let _currentUserId = null;
     let _modulesLoaded = false;
 
     // --- SETTINGS MANAGEMENT (via config.json) ---
@@ -250,8 +251,13 @@ function GodpackForwarder(meta) {
                 }
             }
 
-            // If @everyone was found anywhere, parse and forward
+            // If @everyone was found anywhere, check thread membership before forwarding
             if (hasEveryone) {
+                // Check if user is a member of this thread
+                if (!isUserInThread(message.channel_id)) {
+                    log(`Skipping forward - user is not a member of thread ${message.channel_id}`, "info");
+                    return;
+                }
                 parseAndForwardPing(message);
             }
         } catch (e) {
@@ -387,6 +393,80 @@ function GodpackForwarder(meta) {
     };
 
     /**
+     * Gets the current user ID
+     */
+    const getUserId = () => {
+        if (_currentUserId) return _currentUserId;
+
+        try {
+            const UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getCurrentUser"));
+            if (UserStore?.getCurrentUser) {
+                _currentUserId = UserStore.getCurrentUser()?.id;
+                return _currentUserId;
+            }
+        } catch (e) {
+            log(`Failed to get current user ID: ${e.message}`, "warn");
+        }
+        return null;
+    };
+
+    /**
+     * Checks if the current user is a member of the specified thread
+     * @param {string} channelId - The thread/channel ID to check
+     * @returns {boolean} True if user is a member of the thread
+     */
+    const isUserInThread = (channelId) => {
+        try {
+            const userId = getUserId();
+            if (!userId) {
+                log("Cannot check thread membership - user ID not available", "warn");
+                return false;
+            }
+
+            if (!_channelStore) {
+                log("Cannot check thread membership - ChannelStore not available", "warn");
+                return false;
+            }
+
+            const channel = _channelStore.getChannel(channelId);
+            if (!channel) {
+                log(`Cannot find channel ${channelId} for membership check`, "warn");
+                return false;
+            }
+
+            // Check if it's a thread (types 10, 11, 12, 15)
+            const threadTypes = [10, 11, 12, 15];
+            if (!threadTypes.includes(channel.type)) {
+                // Not a thread, assume user has access (regular channel)
+                return true;
+            }
+
+            // For threads, check the member list
+            // Threads have member property or we can use GuildChannelStore
+            const GuildChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMutableGuildChannelsForGuild"));
+            if (GuildChannelStore) {
+                const ThreadMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("isThreadMember", "getMemberIds"));
+                if (ThreadMemberStore?.isThreadMember) {
+                    return ThreadMemberStore.isThreadMember(channel.guild_id, channelId, userId);
+                }
+            }
+
+            // Fallback: check if user is in memberIdsPreview
+            if (channel.memberIdsPreview && Array.isArray(channel.memberIdsPreview)) {
+                return channel.memberIdsPreview.includes(userId);
+            }
+
+            // If we can't determine, log warning and allow it (fail open to avoid missing notifications)
+            log(`Unable to determine thread membership for ${channelId}, allowing forward`, "warn");
+            return true;
+        } catch (e) {
+            log(`Error checking thread membership: ${e.message}`, "error");
+            // Fail open - allow the forward if we can't check
+            return true;
+        }
+    };
+
+    /**
      * Checks for missed messages on startup and forwards them.
      * Automatically scans all cached channels for Dreama @everyone pings.
      */
@@ -503,6 +583,12 @@ function GodpackForwarder(meta) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
+                        // Check if user is a member of this thread
+                        if (!isUserInThread(thread.id)) {
+                            log(`Skipping missed message - user is not a member of thread ${thread.id}`, "info");
+                            continue;
+                        }
+
                         missedMessages.push({
                             message: msg,
                             timestamp: msgTimestamp,
@@ -585,6 +671,9 @@ function GodpackForwarder(meta) {
                 _modulesLoaded = true;
                 log("Modules loaded. Listening for Godpack pings...", "info");
 
+                // Get current user ID for thread membership checks
+                getUserId();
+
                 // Check for missed messages on startup
                 await checkMissedMessages();
             });
@@ -602,6 +691,7 @@ function GodpackForwarder(meta) {
             _sendMessage = null;
             _channelStore = null;
             _messageActions = null;
+            _currentUserId = null;
             _modulesLoaded = false;
             log("Plugin stopped. Listeners removed.", "info");
             showToast("GodpackForwarder stopped.", "info");
