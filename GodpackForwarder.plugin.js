@@ -37,6 +37,7 @@ function GodpackForwarder(meta) {
     const CONFIG = {
         BOT_USER_ID: "1334630845574676520", // User ID of the Dreama bot to monitor.
         DREAMA_SERVER_ID: "1334603881652555896", // Server ID where Dreama operates.
+        HELPER_ROLE_ID: "1426619911626686598", // Helper role ID - users with this role get membership filtering
     };
 
     // --- Internal State ---
@@ -411,14 +412,43 @@ function GodpackForwarder(meta) {
     };
 
     /**
+     * Checks if the current user has the @helper role
+     * @returns {boolean} True if user has the helper role
+     */
+    const hasHelperRole = () => {
+        try {
+            const userId = getUserId();
+            if (!userId) return false;
+
+            const GuildMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMember"));
+            if (!GuildMemberStore) return false;
+
+            const member = GuildMemberStore.getMember(CONFIG.DREAMA_SERVER_ID, userId);
+            if (!member || !member.roles) return false;
+
+            return member.roles.includes(CONFIG.HELPER_ROLE_ID);
+        } catch (e) {
+            log(`Error checking helper role: ${e.message}`, "warn");
+            return false;
+        }
+    };
+
+    /**
      * Checks if the current user is a member of the specified thread
+     * Only applies membership filtering for users with @helper role
      * @param {string} channelId - The thread/channel ID to check
-     * @returns {boolean} True if user is a member of the thread
+     * @returns {boolean} True if user is a member of the thread (or doesn't have helper role)
      */
     const isUserInThread = (channelId) => {
         try {
+            // Only apply thread membership filtering for users with @helper role
+            if (!hasHelperRole()) {
+                log(`[DEBUG] User doesn't have helper role, allowing all forwards`, "info");
+                return true;
+            }
+
             const userId = getUserId();
-            log(`[DEBUG] Checking thread membership: channelId=${channelId}, userId=${userId}`, "info");
+            log(`[DEBUG] User has helper role, checking thread membership: channelId=${channelId}, userId=${userId}`, "info");
 
             if (!userId) {
                 log("Cannot check thread membership - user ID not available", "warn");
