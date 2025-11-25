@@ -467,6 +467,8 @@ function GodpackForwarder(meta) {
             }
 
             log(`[DEBUG] Channel type: ${channel.type}, name: ${channel.name}`, "info");
+            log(`[DEBUG] Channel keys: ${Object.keys(channel).join(", ")}`, "info");
+            log(`[DEBUG] Channel.member: ${JSON.stringify(channel.member)}`, "info");
 
             // Check if it's a thread (types 10, 11, 12, 15)
             const threadTypes = [10, 11, 12, 15];
@@ -475,14 +477,50 @@ function GodpackForwarder(meta) {
                 return true;
             }
 
-            // For threads, check the member list
-            const ThreadMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("isThreadMember", "getMemberIds"));
-            log(`[DEBUG] ThreadMemberStore found: ${!!ThreadMemberStore}`, "info");
+            // Try multiple methods to find ThreadMemberStore
+            let ThreadMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("isThreadMember", "getMemberIds"));
+            log(`[DEBUG] ThreadMemberStore (method 1) found: ${!!ThreadMemberStore}`, "info");
 
-            if (ThreadMemberStore?.isThreadMember) {
-                const isMember = ThreadMemberStore.isThreadMember(channel.guild_id, channelId, userId);
-                log(`[DEBUG] ThreadMemberStore.isThreadMember result: ${isMember}`, "info");
-                return isMember;
+            if (!ThreadMemberStore) {
+                ThreadMemberStore = BdApi.Webpack.getModule(m => m.isThreadMember && m.getMemberIds);
+                log(`[DEBUG] ThreadMemberStore (method 2) found: ${!!ThreadMemberStore}`, "info");
+            }
+
+            if (!ThreadMemberStore) {
+                ThreadMemberStore = BdApi.Webpack.getModule(m => m.getThreadMemberIds);
+                log(`[DEBUG] ThreadMemberStore (method 3) found: ${!!ThreadMemberStore}`, "info");
+            }
+
+            if (ThreadMemberStore) {
+                log(`[DEBUG] ThreadMemberStore methods: ${Object.keys(ThreadMemberStore).join(", ")}`, "info");
+
+                if (ThreadMemberStore.isThreadMember) {
+                    const isMember = ThreadMemberStore.isThreadMember(channel.guild_id, channelId, userId);
+                    log(`[DEBUG] ThreadMemberStore.isThreadMember result: ${isMember}`, "info");
+                    return isMember;
+                }
+
+                if (ThreadMemberStore.getMemberIds) {
+                    const memberIds = ThreadMemberStore.getMemberIds(channelId);
+                    log(`[DEBUG] ThreadMemberStore.getMemberIds result: ${JSON.stringify(memberIds)}`, "info");
+                    if (memberIds && Array.isArray(memberIds)) {
+                        return memberIds.includes(userId);
+                    }
+                }
+
+                if (ThreadMemberStore.getThreadMemberIds) {
+                    const memberIds = ThreadMemberStore.getThreadMemberIds(channelId);
+                    log(`[DEBUG] ThreadMemberStore.getThreadMemberIds result: ${JSON.stringify(memberIds)}`, "info");
+                    if (memberIds && Array.isArray(memberIds)) {
+                        return memberIds.includes(userId);
+                    }
+                }
+            }
+
+            // Check channel.member property
+            if (channel.member) {
+                log(`[DEBUG] channel.member exists, user is in thread`, "info");
+                return true;
             }
 
             // Fallback: check if user is in memberIdsPreview
@@ -490,7 +528,7 @@ function GodpackForwarder(meta) {
             if (channel.memberIdsPreview && Array.isArray(channel.memberIdsPreview)) {
                 const isMember = channel.memberIdsPreview.includes(userId);
                 log(`[DEBUG] memberIdsPreview check result: ${isMember}`, "info");
-                return isMember;
+                if (isMember) return true;
             }
 
             // If we can't determine, log warning and allow it (fail open to avoid missing notifications)
