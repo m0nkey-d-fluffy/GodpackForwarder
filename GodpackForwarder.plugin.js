@@ -254,6 +254,9 @@ function GodpackForwarder(meta) {
 
             // If @everyone was found anywhere, check thread membership before forwarding
             if (hasEveryone) {
+                // DEBUG: Dump all available data
+                debugThreadMembership(message.channel_id, message);
+
                 // Check if user is a member of this thread (pass true for live event)
                 if (!(await isUserInThread(message.channel_id, true))) {
                     log(`Skipping forward - user is not a member of thread ${message.channel_id}`, "info");
@@ -431,6 +434,99 @@ function GodpackForwarder(meta) {
             log(`Error checking helper role: ${e.message}`, "warn");
             return false;
         }
+    };
+
+    /**
+     * DEBUG: Dumps all available thread membership data to console
+     * Call this when a message comes in to see what data we have
+     */
+    const debugThreadMembership = (channelId, message) => {
+        console.log("=== THREAD MEMBERSHIP DEBUG ===");
+        console.log("Channel ID:", channelId);
+        console.log("User ID:", getUserId());
+
+        // 1. Check message object
+        console.log("\n--- MESSAGE OBJECT ---");
+        console.log("Message keys:", Object.keys(message));
+        console.log("Message.member:", message.member);
+        console.log("Message.guild_id:", message.guild_id);
+
+        // 2. Check channel from ChannelStore
+        if (_channelStore) {
+            const channel = _channelStore.getChannel(channelId);
+            console.log("\n--- CHANNEL STORE DATA ---");
+            console.log("Channel:", channel);
+            console.log("Channel.member:", channel?.member);
+            console.log("Channel.memberIdsPreview:", channel?.memberIdsPreview);
+            console.log("Channel.threadMetadata:", channel?.threadMetadata);
+        }
+
+        // 3. Search for ALL webpack modules with "thread" or "member"
+        console.log("\n--- SEARCHING WEBPACK FOR THREAD/MEMBER STORES ---");
+        try {
+            const allModules = BdApi.Webpack.getModule(() => true, { all: true });
+            console.log("Total webpack modules:", allModules?.length || 0);
+
+            const threadRelated = allModules.filter(m => {
+                const keys = Object.keys(m || {});
+                return keys.some(k =>
+                    k.toLowerCase().includes('thread') ||
+                    k.toLowerCase().includes('member')
+                );
+            });
+            console.log("Modules with thread/member keys:", threadRelated.length);
+
+            // Log first few
+            threadRelated.slice(0, 10).forEach((mod, i) => {
+                console.log(`  Module ${i}:`, Object.keys(mod));
+            });
+        } catch (e) {
+            console.log("Error searching webpack:", e.message);
+        }
+
+        // 4. Try to find specific stores
+        console.log("\n--- SPECIFIC STORE SEARCHES ---");
+
+        const searches = [
+            { name: "ThreadMemberStore (byProps getMember)", filter: BdApi.Webpack.Filters.byProps("getMember") },
+            { name: "GuildMemberStore", filter: BdApi.Webpack.Filters.byProps("getMember", "getMembers") },
+            { name: "ThreadStore", filter: BdApi.Webpack.Filters.byProps("getThread") },
+            { name: "ChannelMemberStore", filter: BdApi.Webpack.Filters.byProps("getChannelMembers") },
+            { name: "ThreadMemberStore v2", filter: m => m.getMember && m.getMemberIds },
+        ];
+
+        searches.forEach(({ name, filter }) => {
+            try {
+                const store = BdApi.Webpack.getModule(filter);
+                if (store) {
+                    console.log(`${name} FOUND:`, Object.keys(store));
+
+                    // Try relevant methods with this specific message
+                    if (store.getMember) {
+                        try {
+                            const result1 = store.getMember(channelId);
+                            console.log(`  ${name}.getMember(channelId):`, result1);
+                        } catch (e) {}
+
+                        try {
+                            const result2 = store.getMember(message.guild_id, channelId);
+                            console.log(`  ${name}.getMember(guildId, channelId):`, result2);
+                        } catch (e) {}
+
+                        try {
+                            const result3 = store.getMember(message.guild_id, channelId, getUserId());
+                            console.log(`  ${name}.getMember(guildId, channelId, userId):`, result3);
+                        } catch (e) {}
+                    }
+                } else {
+                    console.log(`${name}: NOT FOUND`);
+                }
+            } catch (e) {
+                console.log(`${name} error:`, e.message);
+            }
+        });
+
+        console.log("\n=== END DEBUG ===");
     };
 
     /**
