@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.5
+ * @version 1.0.6
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -531,14 +531,51 @@ function GodpackForwarder(meta) {
 
     /**
      * Checks if the current user is a member of the specified thread
-     * Uses same logic as historical check - fails open when uncertain
+     * Uses ActiveThreadsStore.getActiveJoinedThreadsForGuild to check if user has joined the thread
      * @param {string} channelId - The thread/channel ID to check
      * @param {boolean} isLiveEvent - Whether this is a live MESSAGE_CREATE event (vs catch-up)
-     * @returns {boolean} True if user is a member of the thread (or can't determine)
+     * @returns {boolean} True if user is a member of the thread
      */
     const isUserInThread = async (channelId, isLiveEvent = false) => {
-        // Always fail open - same logic as historical check which works correctly
-        return true;
+        try {
+            // Only apply thread membership filtering for users with @helper role
+            if (!hasHelperRole()) {
+                return true;
+            }
+
+            // Get ActiveThreadsStore - same one used in catch-up
+            const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+            if (!ActiveThreadsStore) {
+                log("ActiveThreadsStore not found, allowing forward", "warn");
+                return true;
+            }
+
+            // Get all active/joined threads for the Dreama server
+            const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+            if (!activeThreads) {
+                log("No active threads found, allowing forward", "warn");
+                return true;
+            }
+
+            // Check if the channel ID exists in any of the active threads
+            // Structure: { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
+            for (const parentChannelId of Object.keys(activeThreads)) {
+                const threadsInParent = activeThreads[parentChannelId];
+                if (threadsInParent[channelId]) {
+                    // Found it - user is a member
+                    return true;
+                }
+            }
+
+            // Channel not in active threads - user is not a member
+            log(`Thread ${channelId} not in active threads, blocking forward`, "info");
+            return false;
+        } catch (e) {
+            log(`Error checking thread membership: ${e.message}`, "error");
+            // Fail open on error
+            return true;
+        }
+    };
 
         /* DISABLED CODE - keeping for reference
         try {
