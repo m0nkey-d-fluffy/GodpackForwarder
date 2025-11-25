@@ -217,7 +217,7 @@ function GodpackForwarder(meta) {
      * This function is called by the Dispatcher patch on every new message.
      * @param {object} message The message object from the dispatcher.
      */
-    const onMessageReceived = (message) => {
+    const onMessageReceived = async (message) => {
         try {
             // Filter 1: Must be from the specific bot
             if (!message || message.author?.id !== CONFIG.BOT_USER_ID) return;
@@ -255,7 +255,7 @@ function GodpackForwarder(meta) {
             // If @everyone was found anywhere, check thread membership before forwarding
             if (hasEveryone) {
                 // Check if user is a member of this thread (pass true for live event)
-                if (!isUserInThread(message.channel_id, true)) {
+                if (!(await isUserInThread(message.channel_id, true))) {
                     log(`Skipping forward - user is not a member of thread ${message.channel_id}`, "info");
                     return;
                 }
@@ -440,7 +440,7 @@ function GodpackForwarder(meta) {
      * @param {boolean} isLiveEvent - Whether this is a live MESSAGE_CREATE event (vs catch-up)
      * @returns {boolean} True if user is a member of the thread (or doesn't have helper role)
      */
-    const isUserInThread = (channelId, isLiveEvent = false) => {
+    const isUserInThread = async (channelId, isLiveEvent = false) => {
         try {
             // Only apply thread membership filtering for users with @helper role
             if (!hasHelperRole()) {
@@ -532,13 +532,41 @@ function GodpackForwarder(meta) {
                 if (isMember) return true;
             }
 
-            // For @helper role users: behavior depends on context
+            // Last resort: fetch thread members via API
+            log(`[DEBUG] Fetching thread members via API for ${channelId}...`, "info");
+            try {
+                const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps('token'), { searchExports: true });
+                const token = TokenModule?.token;
+
+                if (token) {
+                    const response = await fetch(`https://discord.com/api/v9/channels/${channelId}/thread-members`, {
+                        headers: {
+                            "Authorization": token,
+                            "Content-Type": "application/json"
+                        }
+                    });
+
+                    if (response.ok) {
+                        const members = await response.json();
+                        log(`[DEBUG] API returned ${members.length} thread members`, "info");
+                        const isMember = members.some(m => m.user_id === userId);
+                        log(`[DEBUG] API membership check result: ${isMember}`, "info");
+                        return isMember;
+                    } else {
+                        log(`[DEBUG] API fetch failed: ${response.status} ${response.statusText}`, "warn");
+                    }
+                }
+            } catch (apiError) {
+                log(`[DEBUG] Failed to fetch thread members via API: ${apiError.message}`, "warn");
+            }
+
+            // If all else fails: behavior depends on context
             if (isLiveEvent) {
-                // For live events: fail closed - if channel.member is undefined, user is not a member
+                // For live events: fail closed
                 log(`Unable to determine thread membership for ${channelId} (live event), blocking forward for @helper user`, "warn");
                 return false;
             } else {
-                // For catch-up: fail open - channel data might not be fully loaded
+                // For catch-up: fail open
                 log(`Unable to determine thread membership for ${channelId} (catch-up), allowing forward`, "warn");
                 return true;
             }
@@ -667,7 +695,7 @@ function GodpackForwarder(meta) {
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
                         // Check if user is a member of this thread
-                        if (!isUserInThread(thread.id)) {
+                        if (!(await isUserInThread(thread.id))) {
                             log(`Skipping missed message - user is not a member of thread ${thread.id}`, "info");
                             continue;
                         }
