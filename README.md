@@ -1,6 +1,6 @@
 # GodpackForwarder Plugin
 
-**Author:** m0nkey.d.fluffy **Version:** 1.0.3
+**Author:** m0nkey.d.fluffy **Version:** 1.0.4
 
 ## Description
 
@@ -10,7 +10,9 @@ If a message from this bot contains an `@everyone` ping (either in the text or w
 
 This allows you to receive Godpack notifications in a dedicated channel without having to mute or manage pings in the main server. The plugin automatically prevents forwarding when the forward channel is in the same server as the bot.
 
-**New in v1.0.3:** The plugin can now catch up on missed messages! If you were offline or had the plugin disabled, it will automatically scan all your Discord channels for missed @everyone pings from Dreama and forward them in chronological order.
+**New in v1.0.3:** The plugin can now catch up on missed messages! If you were offline or had the plugin disabled, it will automatically scan the Dreama server for missed @everyone pings and forward them in chronological order.
+
+**New in v1.0.4:** Smart thread filtering for @helper role users! If you have the @helper role, the plugin now only forwards messages from threads you're actively a member of, preventing spam from threads you're not involved in. This feature automatically detects your thread membership and applies intelligent filtering.
 
 ## Installation
 
@@ -127,7 +129,15 @@ This is the complete logic the plugin follows.
 
     -   **If different server:** The forwarding proceeds.
 
-5.  **Forwarding:** If all checks pass:
+5.  **Thread Membership Check (v1.0.4):** For users with the @helper role, the plugin verifies you're a member of the thread being pinged.
+
+    -   **If not a member:** The message is silently blocked to prevent spam from irrelevant threads.
+
+    -   **If a member or not @helper:** The forwarding proceeds.
+
+    -   Uses Discord's `ActiveThreadsStore` to intelligently detect which threads you've joined.
+
+6.  **Forwarding:** If all checks pass:
 
     -   The plugin logs (purple) "Godpack ping detected! Parsing and forwarding..." to your console.
 
