@@ -254,8 +254,8 @@ function GodpackForwarder(meta) {
 
             // If @everyone was found anywhere, check thread membership before forwarding
             if (hasEveryone) {
-                // Check if user is a member of this thread
-                if (!isUserInThread(message.channel_id)) {
+                // Check if user is a member of this thread (pass true for live event)
+                if (!isUserInThread(message.channel_id, true)) {
                     log(`Skipping forward - user is not a member of thread ${message.channel_id}`, "info");
                     return;
                 }
@@ -437,9 +437,10 @@ function GodpackForwarder(meta) {
      * Checks if the current user is a member of the specified thread
      * Only applies membership filtering for users with @helper role
      * @param {string} channelId - The thread/channel ID to check
+     * @param {boolean} isLiveEvent - Whether this is a live MESSAGE_CREATE event (vs catch-up)
      * @returns {boolean} True if user is a member of the thread (or doesn't have helper role)
      */
-    const isUserInThread = (channelId) => {
+    const isUserInThread = (channelId, isLiveEvent = false) => {
         try {
             // Only apply thread membership filtering for users with @helper role
             if (!hasHelperRole()) {
@@ -531,9 +532,16 @@ function GodpackForwarder(meta) {
                 if (isMember) return true;
             }
 
-            // If we can't determine, log warning and allow it (fail open to avoid missing notifications)
-            log(`Unable to determine thread membership for ${channelId}, allowing forward`, "warn");
-            return true;
+            // For @helper role users: behavior depends on context
+            if (isLiveEvent) {
+                // For live events: fail closed - if channel.member is undefined, user is not a member
+                log(`Unable to determine thread membership for ${channelId} (live event), blocking forward for @helper user`, "warn");
+                return false;
+            } else {
+                // For catch-up: fail open - channel data might not be fully loaded
+                log(`Unable to determine thread membership for ${channelId} (catch-up), allowing forward`, "warn");
+                return true;
+            }
         } catch (e) {
             log(`Error checking thread membership: ${e.message}`, "error");
             // Fail open - allow the forward if we can't check
