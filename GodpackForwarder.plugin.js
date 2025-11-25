@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.3
+ * @version 1.0.4
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -37,6 +37,7 @@ function GodpackForwarder(meta) {
     const CONFIG = {
         BOT_USER_ID: "1334630845574676520", // User ID of the Dreama bot to monitor.
         DREAMA_SERVER_ID: "1334603881652555896", // Server ID where Dreama operates.
+        HELPER_ROLE_ID: "1426619911626686598", // Helper role ID - users with this role get membership filtering
     };
 
     // --- Internal State ---
@@ -44,6 +45,7 @@ function GodpackForwarder(meta) {
     let _sendMessage = null;
     let _channelStore = null;
     let _messageActions = null;
+    let _currentUserId = null;
     let _modulesLoaded = false;
 
     // --- SETTINGS MANAGEMENT (via config.json) ---
@@ -215,7 +217,7 @@ function GodpackForwarder(meta) {
      * This function is called by the Dispatcher patch on every new message.
      * @param {object} message The message object from the dispatcher.
      */
-    const onMessageReceived = (message) => {
+    const onMessageReceived = async (message) => {
         try {
             // Filter 1: Must be from the specific bot
             if (!message || message.author?.id !== CONFIG.BOT_USER_ID) return;
@@ -250,8 +252,12 @@ function GodpackForwarder(meta) {
                 }
             }
 
-            // If @everyone was found anywhere, parse and forward
+            // If @everyone was found anywhere, check thread membership before forwarding
             if (hasEveryone) {
+                // Check if user is a member of this thread (pass true for live event)
+                if (!(await isUserInThread(message.channel_id, true))) {
+                    return;
+                }
                 parseAndForwardPing(message);
             }
         } catch (e) {
@@ -387,6 +393,92 @@ function GodpackForwarder(meta) {
     };
 
     /**
+     * Gets the current user ID
+     */
+    const getUserId = () => {
+        if (_currentUserId) return _currentUserId;
+
+        try {
+            const UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getCurrentUser"));
+            if (UserStore?.getCurrentUser) {
+                _currentUserId = UserStore.getCurrentUser()?.id;
+                return _currentUserId;
+            }
+        } catch (e) {
+            log(`Failed to get current user ID: ${e.message}`, "warn");
+        }
+        return null;
+    };
+
+    /**
+     * Checks if the current user has the @helper role
+     * @returns {boolean} True if user has the helper role
+     */
+    const hasHelperRole = () => {
+        try {
+            const userId = getUserId();
+            if (!userId) return false;
+
+            const GuildMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMember"));
+            if (!GuildMemberStore) return false;
+
+            const member = GuildMemberStore.getMember(CONFIG.DREAMA_SERVER_ID, userId);
+            if (!member || !member.roles) return false;
+
+            return member.roles.includes(CONFIG.HELPER_ROLE_ID);
+        } catch (e) {
+            log(`Error checking helper role: ${e.message}`, "warn");
+            return false;
+        }
+    };
+
+    /**
+     * Checks if the current user is a member of the specified thread
+     * Uses ActiveThreadsStore.getActiveJoinedThreadsForGuild to check if user has joined the thread
+     * @param {string} channelId - The thread/channel ID to check
+     * @param {boolean} isLiveEvent - Whether this is a live MESSAGE_CREATE event (vs catch-up)
+     * @returns {boolean} True if user is a member of the thread
+     */
+    const isUserInThread = async (channelId, isLiveEvent = false) => {
+        try {
+            // Only apply thread membership filtering for users with @helper role
+            if (!hasHelperRole()) {
+                return true;
+            }
+
+            // Get ActiveThreadsStore - same one used in catch-up
+            const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+            if (!ActiveThreadsStore) {
+                return true; // Fail open if store not available
+            }
+
+            // Get all active/joined threads for the Dreama server
+            const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+            if (!activeThreads) {
+                return true; // Fail open if no threads
+            }
+
+            // Check if the channel ID exists in any of the active threads
+            // Structure: { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
+            for (const parentChannelId of Object.keys(activeThreads)) {
+                const threadsInParent = activeThreads[parentChannelId];
+                if (threadsInParent[channelId]) {
+                    // Found it - user is a member
+                    return true;
+                }
+            }
+
+            // Channel not in active threads - user is not a member
+            return false;
+        } catch (e) {
+            log(`Error checking thread membership: ${e.message}`, "error");
+            // Fail open on error
+            return true;
+        }
+    };
+
+
+    /**
      * Checks for missed messages on startup and forwards them.
      * Automatically scans all cached channels for Dreama @everyone pings.
      */
@@ -503,6 +595,11 @@ function GodpackForwarder(meta) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
 
                     if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
+                        // Check if user is a member of this thread
+                        if (!(await isUserInThread(thread.id))) {
+                            continue;
+                        }
+
                         missedMessages.push({
                             message: msg,
                             timestamp: msgTimestamp,
@@ -585,6 +682,9 @@ function GodpackForwarder(meta) {
                 _modulesLoaded = true;
                 log("Modules loaded. Listening for Godpack pings...", "info");
 
+                // Get current user ID for thread membership checks
+                getUserId();
+
                 // Check for missed messages on startup
                 await checkMissedMessages();
             });
@@ -602,6 +702,7 @@ function GodpackForwarder(meta) {
             _sendMessage = null;
             _channelStore = null;
             _messageActions = null;
+            _currentUserId = null;
             _modulesLoaded = false;
             log("Plugin stopped. Listeners removed.", "info");
             showToast("GodpackForwarder stopped.", "info");
