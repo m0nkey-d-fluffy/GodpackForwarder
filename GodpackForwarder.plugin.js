@@ -418,6 +418,8 @@ function GodpackForwarder(meta) {
     const isUserInThread = (channelId) => {
         try {
             const userId = getUserId();
+            log(`[DEBUG] Checking thread membership: channelId=${channelId}, userId=${userId}`, "info");
+
             if (!userId) {
                 log("Cannot check thread membership - user ID not available", "warn");
                 return false;
@@ -434,26 +436,31 @@ function GodpackForwarder(meta) {
                 return false;
             }
 
+            log(`[DEBUG] Channel type: ${channel.type}, name: ${channel.name}`, "info");
+
             // Check if it's a thread (types 10, 11, 12, 15)
             const threadTypes = [10, 11, 12, 15];
             if (!threadTypes.includes(channel.type)) {
-                // Not a thread, assume user has access (regular channel)
+                log(`[DEBUG] Not a thread (type ${channel.type}), allowing forward`, "info");
                 return true;
             }
 
             // For threads, check the member list
-            // Threads have member property or we can use GuildChannelStore
-            const GuildChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMutableGuildChannelsForGuild"));
-            if (GuildChannelStore) {
-                const ThreadMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("isThreadMember", "getMemberIds"));
-                if (ThreadMemberStore?.isThreadMember) {
-                    return ThreadMemberStore.isThreadMember(channel.guild_id, channelId, userId);
-                }
+            const ThreadMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("isThreadMember", "getMemberIds"));
+            log(`[DEBUG] ThreadMemberStore found: ${!!ThreadMemberStore}`, "info");
+
+            if (ThreadMemberStore?.isThreadMember) {
+                const isMember = ThreadMemberStore.isThreadMember(channel.guild_id, channelId, userId);
+                log(`[DEBUG] ThreadMemberStore.isThreadMember result: ${isMember}`, "info");
+                return isMember;
             }
 
             // Fallback: check if user is in memberIdsPreview
+            log(`[DEBUG] memberIdsPreview: ${JSON.stringify(channel.memberIdsPreview)}`, "info");
             if (channel.memberIdsPreview && Array.isArray(channel.memberIdsPreview)) {
-                return channel.memberIdsPreview.includes(userId);
+                const isMember = channel.memberIdsPreview.includes(userId);
+                log(`[DEBUG] memberIdsPreview check result: ${isMember}`, "info");
+                return isMember;
             }
 
             // If we can't determine, log warning and allow it (fail open to avoid missing notifications)
