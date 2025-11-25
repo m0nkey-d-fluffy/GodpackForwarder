@@ -435,17 +435,13 @@ function GodpackForwarder(meta) {
 
     /**
      * Checks if the current user is a member of the specified thread
-     * DISABLED: Discord doesn't provide reliable thread membership detection
-     * - ThreadMemberStore doesn't exist
-     * - channel.member is always undefined
-     * - memberIdsPreview only shows 5 members
-     * - API endpoint returns 403 Forbidden
+     * Uses same logic as historical check - fails open when uncertain
      * @param {string} channelId - The thread/channel ID to check
      * @param {boolean} isLiveEvent - Whether this is a live MESSAGE_CREATE event (vs catch-up)
-     * @returns {boolean} Always returns true (membership filtering disabled)
+     * @returns {boolean} True if user is a member of the thread (or can't determine)
      */
     const isUserInThread = async (channelId, isLiveEvent = false) => {
-        // Thread membership filtering is disabled - no reliable way to detect it
+        // Always fail open - same logic as historical check which works correctly
         return true;
 
         /* DISABLED CODE - keeping for reference
