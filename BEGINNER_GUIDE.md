@@ -183,9 +183,6 @@ Godpack description here...
 
 [Image URL if present]
 ```
-
-`[SCREENSHOT PLACEHOLDER: Example of a forwarded message in the destination channel]`
-
 ---
 
 ## Troubleshooting
@@ -210,6 +207,7 @@ Make sure you've enabled **Developer Mode** in Discord settings:
 This might mean:
 - The plugin file wasn't in the correct folder
 - BetterDiscord failed to load
+- Discord updated and uninstalled BetterDiscord
 - Try **reinstalling the plugin** by following the installation steps again
 
 ### I'm getting error messages in the console
