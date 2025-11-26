@@ -6,7 +6,7 @@
 
 ## What is GodpackForwarder?
 
-GodpackForwarder is a BetterDiscord plugin that automatically forwards Godpack notifications (from the Dreama bot) to a private channel of your choice. This way, you can get notified about important Godpack events without being spammed in the main server!
+GodpackForwarder is a BetterDiscord plugin that automatically forwards Godpack notifications (from the Dreama bot) to a private channel of your choice. This way, you can get notified about important Godpack events without being spammed in the main server! It checks for live updates from Dreama for precious Godpacks, and can even send you a list of Godpacks that you missed while the plugin was deactivated (the plugin has to run at least once before it can do catch-up lists).
 
 ---
 
