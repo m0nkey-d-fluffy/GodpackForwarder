@@ -37,19 +37,13 @@ BetterDiscord is a modification for Discord that allows you to install custom th
 
 1. **Download BetterDiscord** from the official website: https://betterdiscord.app/
 
-   `[SCREENSHOT PLACEHOLDER: BetterDiscord download page]`
-
 2. **Run the installer** and follow the on-screen instructions.
 
 3. **Select which Discord version** you want to install BetterDiscord on (Stable, PTB, or Canary).
 
-   `[SCREENSHOT PLACEHOLDER: BetterDiscord installer showing Discord version selection]`
-
 4. **Restart Discord** after installation completes.
 
 5. **Verify installation** by opening Discord Settings. You should see new sections called "BetterDiscord" at the bottom of your settings menu.
-
-   `[SCREENSHOT PLACEHOLDER: Discord settings showing BetterDiscord sections]`
 
 ---
 
@@ -57,9 +51,7 @@ BetterDiscord is a modification for Discord that allows you to install custom th
 
 ### Download the Plugin
 
-1. Download the `GodpackForwarder.plugin.js` file from the [Releases page](https://github.com/m0nkey-d-fluffy/GodpackForwarder/releases).
-
-   `[SCREENSHOT PLACEHOLDER: GitHub releases page]`
+1. Download the `GodpackForwarder.plugin.js` file.
 
 2. **Don't open or run the file!** Just download it to a location you can find easily (like your Downloads folder).
 
@@ -69,21 +61,13 @@ BetterDiscord is a modification for Discord that allows you to install custom th
 
 2. Scroll down to the **BetterDiscord** section and click **Plugins**.
 
-   `[SCREENSHOT PLACEHOLDER: BetterDiscord settings menu showing Plugins option]`
-
 3. Click the **Open Plugins Folder** button at the top of the page.
 
-   `[SCREENSHOT PLACEHOLDER: Plugins page with "Open Plugins Folder" button highlighted]`
-
-4. **Drag and drop** the `GodpackForwarder.plugin.js` file into this folder.
-
-   `[SCREENSHOT PLACEHOLDER: File explorer showing the plugins folder]`
+4. **Drag and drop or Copy and Paste** the `GodpackForwarder.plugin.js` file into this folder.
 
 5. Return to Discord. If you don't see the plugin appear in the list, press **Ctrl+R** (Windows/Linux) or **Cmd+R** (Mac) to reload Discord.
 
 6. **Enable the plugin** by clicking the toggle switch next to "GodpackForwarder".
-
-   `[SCREENSHOT PLACEHOLDER: Plugin list showing GodpackForwarder with toggle switch]`
 
 ---
 
@@ -95,13 +79,9 @@ BetterDiscord is a modification for Discord that allows you to install custom th
 
 2. Click the **gear icon (⚙️)** next to the plugin name to open the settings panel.
 
-   `[SCREENSHOT PLACEHOLDER: Plugin list with settings gear icon highlighted]`
-
 ### Settings Explained
 
 The settings panel has two main options:
-
-`[SCREENSHOT PLACEHOLDER: GodpackForwarder settings panel]`
 
 #### **Forward Channel ID**
 This is where you tell the plugin which channel to send notifications to. You'll need to get your own channel ID (see next section).
@@ -138,11 +118,7 @@ Before you can copy channel IDs, you need to enable Developer Mode in Discord:
 
 2. Go to **Advanced** (in the left sidebar, under "App Settings").
 
-   `[SCREENSHOT PLACEHOLDER: Settings menu showing Advanced option]`
-
 3. Toggle on **Developer Mode**.
-
-   `[SCREENSHOT PLACEHOLDER: Advanced settings with Developer Mode toggle highlighted]`
 
 ### Copying the Channel ID
 
@@ -152,8 +128,6 @@ Before you can copy channel IDs, you need to enable Developer Mode in Discord:
    - We recommend a private channel in your own server.
 
 2. **Right-click on the channel name** in the sidebar.
-
-   `[SCREENSHOT PLACEHOLDER: Right-click context menu on a channel]`
 
 3. Click **Copy Channel ID** (it should be near the bottom of the menu).
 
@@ -165,15 +139,11 @@ Before you can copy channel IDs, you need to enable Developer Mode in Discord:
 
 2. **Paste the channel ID** into the "Forward Channel ID" field.
 
-   `[SCREENSHOT PLACEHOLDER: Settings panel with channel ID pasted in the input field]`
-
 3. Make sure the **"Catch up on missed messages at startup"** checkbox is checked if you want this feature.
 
 4. Click **Save Settings**.
 
 5. You should see a success message: "GodpackForwarder settings saved!"
-
-   `[SCREENSHOT PLACEHOLDER: Success toast notification]`
 
 ---
 
@@ -195,8 +165,6 @@ You can't easily trigger a test ping yourself, but you can verify the plugin is 
    - Press **Ctrl+Shift+I** (Windows/Linux) or **Cmd+Option+I** (Mac) to open Developer Tools
    - Go to the **Console** tab
    - Look for purple messages from `[GodpackForwarder]` indicating the plugin is running
-
-   `[SCREENSHOT PLACEHOLDER: Console showing plugin logs]`
 
 2. **Wait for a real ping**: The next time Dreama sends an @everyone ping, it will be forwarded to your channel!
 
