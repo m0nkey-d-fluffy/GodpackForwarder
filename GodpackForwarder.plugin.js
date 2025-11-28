@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.4
+ * @version 1.0.5
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -276,7 +276,7 @@ function GodpackForwarder(meta) {
             
             // Webpack Search
             let mod = BdApi.Webpack.getModule(m => m.dispatch && m._events, { searchExports: true });
-            if (!mod) mod = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("subscribe", "unsubscribe", "dispatch"));
+            if (!mod) mod = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("subscribe", "unsubscribe", "dispatch"));
             dispatchModule = mod.dispatch ? mod : (mod.default ? mod.default : mod);
 
             if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
@@ -309,7 +309,7 @@ function GodpackForwarder(meta) {
         try {
             log("Attempting to find Send Message module (legacy)...");
             // Use a simple, stable filter
-            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("sendMessage", "receiveMessage"));
+            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byKeys("sendMessage", "receiveMessage"));
 
             _sendMessage = mod.sendMessage;
             if (!_sendMessage) throw new Error("Could not find sendMessage function.");
@@ -328,7 +328,7 @@ function GodpackForwarder(meta) {
     const loadChannelStore = async () => {
         try {
             log("Attempting to find Channel Store module...");
-            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("getChannel", "hasChannel"));
+            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byKeys("getChannel", "hasChannel"));
 
             _channelStore = mod;
             if (!_channelStore) throw new Error("Could not find Channel Store module.");
@@ -347,7 +347,7 @@ function GodpackForwarder(meta) {
     const loadMessageActions = async () => {
         try {
             log("Attempting to find Message Actions module...");
-            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byProps("fetchMessages", "sendMessage"));
+            const mod = await BdApi.Webpack.waitForModule(BdApi.Webpack.Filters.byKeys("fetchMessages", "sendMessage"));
 
             _messageActions = mod;
             if (!_messageActions) throw new Error("Could not find Message Actions module.");
@@ -399,7 +399,7 @@ function GodpackForwarder(meta) {
         if (_currentUserId) return _currentUserId;
 
         try {
-            const UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getCurrentUser"));
+            const UserStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getCurrentUser"));
             if (UserStore?.getCurrentUser) {
                 _currentUserId = UserStore.getCurrentUser()?.id;
                 return _currentUserId;
@@ -419,7 +419,7 @@ function GodpackForwarder(meta) {
             const userId = getUserId();
             if (!userId) return false;
 
-            const GuildMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMember"));
+            const GuildMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getMember"));
             if (!GuildMemberStore) return false;
 
             const member = GuildMemberStore.getMember(CONFIG.DREAMA_SERVER_ID, userId);
@@ -447,7 +447,7 @@ function GodpackForwarder(meta) {
             }
 
             // Get ActiveThreadsStore - same one used in catch-up
-            const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+            const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getActiveJoinedThreadsForGuild"));
             if (!ActiveThreadsStore) {
                 return true; // Fail open if store not available
             }
@@ -499,14 +499,14 @@ function GodpackForwarder(meta) {
 
         try {
             // Get the Message Store module
-            const MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getMessages", "getMessage"));
+            const MessageStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getMessages", "getMessage"));
             if (!MessageStore) {
                 log("Could not find Message Store module.", "error");
                 return;
             }
 
             // Get all channels
-            const ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getChannel", "getAllThreadsForParent"));
+            const ChannelStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getChannel", "getAllThreadsForParent"));
             if (!ChannelStore) {
                 log("Could not find Channel Store module.", "error");
                 return;
@@ -518,7 +518,7 @@ function GodpackForwarder(meta) {
             // Also get active threads
             let allThreads = [];
             try {
-                const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps("getActiveJoinedThreadsForGuild"));
+                const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getActiveJoinedThreadsForGuild"));
                 if (ActiveThreadsStore) {
                     const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
                     if (activeThreads) {
@@ -566,7 +566,7 @@ function GodpackForwarder(meta) {
                 // If no cached messages, fetch via Discord API
                 if (messagesArray.length === 0) {
                     try {
-                        const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byProps('token'), { searchExports: true });
+                        const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys('token'), { searchExports: true });
                         const token = TokenModule?.token;
 
                         if (token) {
