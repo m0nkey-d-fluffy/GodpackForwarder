@@ -1,6 +1,6 @@
 # GodpackForwarder Plugin
 
-**Author:** m0nkey.d.fluffy **Version:** 1.0.4
+**Author:** m0nkey.d.fluffy **Version:** 1.0.5
 
 ## Description
 
