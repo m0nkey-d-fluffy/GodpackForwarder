@@ -2,7 +2,7 @@
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
  * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.5
+ * @version 1.0.6
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -110,7 +110,7 @@ function GodpackForwarder(meta) {
 
     /** A helper to show a toast notification. */
     const showToast = (message, type = "info") => {
-        if (window.BdApi && BdApi.showToast) BdApi.showToast(message, { type });
+        if (window.BdApi && BdApi.UI?.showToast) BdApi.UI.showToast(message, { type });
         else log(`TOAST: ${message}`, type);
     };
 
@@ -268,21 +268,48 @@ function GodpackForwarder(meta) {
     /**
      * Finds and patches the Discord Event Dispatcher.
      */
-    const loadDispatcherPatch = async () => { 
+    const loadDispatcherPatch = async () => {
         try {
             log("Attempting to find Discord Event Dispatcher module...");
-            
+
             let dispatchModule = null;
-            
-            // Webpack Search
-            let mod = BdApi.Webpack.getModule(m => m.dispatch && m._events, { searchExports: true });
-            if (!mod) mod = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("subscribe", "unsubscribe", "dispatch"));
-            dispatchModule = mod.dispatch ? mod : (mod.default ? mod.default : mod);
+
+            // Method 1: BD's official pattern - getByKeys with searchExports (this is how BD itself finds it)
+            dispatchModule = BdApi.Webpack.getByKeys("dispatch", "subscribe", "register", { searchExports: true });
+            if (dispatchModule) log("Found dispatcher via method 1 (getByKeys with searchExports)", "info");
+
+            // Method 2: Try getting FluxDispatcher from Stores
+            if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
+                dispatchModule = BdApi.Webpack.Stores?.FluxDispatcher;
+                if (dispatchModule) log("Found dispatcher via method 2 (Stores.FluxDispatcher)", "info");
+            }
+
+            // Method 3: Try getModule with _actionHandlers (new Discord pattern)
+            if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
+                dispatchModule = BdApi.Webpack.getModule(m => m?._actionHandlers && m?.dispatch && m?.subscribe, { searchExports: true });
+                if (dispatchModule) log("Found dispatcher via method 3 (_actionHandlers)", "info");
+            }
+
+            // Method 4: Legacy pattern with _events
+            if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
+                let mod = BdApi.Webpack.getModule(m => m?.dispatch && m?._events, { searchExports: true });
+                if (mod) {
+                    dispatchModule = mod.dispatch ? mod : (mod.default ? mod.default : mod);
+                    log("Found dispatcher via method 4 (_events)", "info");
+                }
+            }
+
+            // Method 5: waitForModule as last resort
+            if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
+                log("Trying waitForModule as last resort...", "warn");
+                dispatchModule = await BdApi.Webpack.waitForModule(m => m?.dispatch && m?.subscribe && m?.register, { searchExports: true });
+                if (dispatchModule) log("Found dispatcher via method 5 (waitForModule)", "info");
+            }
 
             if (!dispatchModule || typeof dispatchModule.dispatch !== 'function') {
                 throw new Error("Could not locate a usable Dispatcher module.");
             }
-            
+
             _dispatcher = dispatchModule;
             
             // Patch the core dispatch function to intercept MESSAGE_CREATE events
@@ -566,8 +593,17 @@ function GodpackForwarder(meta) {
                 // If no cached messages, fetch via Discord API
                 if (messagesArray.length === 0) {
                     try {
-                        const TokenModule = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys('token'), { searchExports: true });
-                        const token = TokenModule?.token;
+                        let token = null;
+                        // Try getToken function first
+                        let TokenModule = BdApi.Webpack.getModule(m => m?.getToken, { searchExports: true });
+                        if (TokenModule && typeof TokenModule.getToken === 'function') {
+                            token = TokenModule.getToken();
+                        }
+                        // Fall back to direct token property
+                        if (!token) {
+                            TokenModule = BdApi.Webpack.getModule(m => m?.token && typeof m.token === "string", { searchExports: true });
+                            token = TokenModule?.token;
+                        }
 
                         if (token) {
                             const response = await fetch(`https://discord.com/api/v9/channels/${thread.id}/messages?limit=50`, {
