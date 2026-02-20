@@ -1,8 +1,8 @@
 /**
  * @name GodpackForwarder
  * @author m0nkey.d.fluffy
- * @description Listens for @everyone pings from Dreama and forwards them to a configurable channel.
- * @version 1.0.6
+ * @description Listens for @everyone pings from Reapa and forwards them to a configurable channel.
+ * @version 1.0.7
  * @source https://github.com/m0nkey-d-fluffy/GodpackForwarder
  */
 
@@ -35,8 +35,8 @@ function GodpackForwarder(meta) {
 
     // --- CONFIGURATION ---
     const CONFIG = {
-        BOT_USER_ID: "1334630845574676520", // User ID of the Dreama bot to monitor.
-        DREAMA_SERVER_ID: "1334603881652555896", // Server ID where Dreama operates.
+        BOT_USER_ID: "1474129399073996974", // User ID of the Reapa bot to monitor.
+        REAPA_SERVER_ID: "1334603881652555896", // Server ID where Reapa operates.
         HELPER_ROLE_ID: "1426619911626686598", // Helper role ID - users with this role get membership filtering
     };
 
@@ -388,11 +388,11 @@ function GodpackForwarder(meta) {
     };
 
     /**
-     * Checks if a message contains @everyone from Dreama.
+     * Checks if a message contains @everyone from Reapa.
      * @param {object} message The message object.
      * @returns {boolean} True if message matches criteria.
      */
-    const isDreamaEveryonePing = (message) => {
+    const isReapaEveryonePing = (message) => {
         if (!message || message.author?.id !== CONFIG.BOT_USER_ID) return false;
 
         // Check text content
@@ -449,7 +449,7 @@ function GodpackForwarder(meta) {
             const GuildMemberStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getMember"));
             if (!GuildMemberStore) return false;
 
-            const member = GuildMemberStore.getMember(CONFIG.DREAMA_SERVER_ID, userId);
+            const member = GuildMemberStore.getMember(CONFIG.REAPA_SERVER_ID, userId);
             if (!member || !member.roles) return false;
 
             return member.roles.includes(CONFIG.HELPER_ROLE_ID);
@@ -479,8 +479,8 @@ function GodpackForwarder(meta) {
                 return true; // Fail open if store not available
             }
 
-            // Get all active/joined threads for the Dreama server
-            const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+            // Get all active/joined threads for the Reapa server
+            const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.REAPA_SERVER_ID);
             if (!activeThreads) {
                 return true; // Fail open if no threads
             }
@@ -507,7 +507,7 @@ function GodpackForwarder(meta) {
 
     /**
      * Checks for missed messages on startup and forwards them.
-     * Automatically scans all cached channels for Dreama @everyone pings.
+     * Automatically scans all cached channels for Reapa @everyone pings.
      */
     const checkMissedMessages = async () => {
         if (!currentSettings.catchUpOnStart) {
@@ -520,7 +520,7 @@ function GodpackForwarder(meta) {
             return;
         }
 
-        log(`Scanning Dreama server (${CONFIG.DREAMA_SERVER_ID}) for missed @everyone pings...`, "info");
+        log(`Scanning Reapa server (${CONFIG.REAPA_SERVER_ID}) for missed @everyone pings...`, "info");
 
         const missedMessages = [];
 
@@ -539,15 +539,15 @@ function GodpackForwarder(meta) {
                 return;
             }
 
-            // Get all channels in the Dreama server
-            const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.DREAMA_SERVER_ID) || {});
+            // Get all channels in the Reapa server
+            const guildChannels = Object.values(ChannelStore.getMutableGuildChannelsForGuild(CONFIG.REAPA_SERVER_ID) || {});
 
             // Also get active threads
             let allThreads = [];
             try {
                 const ActiveThreadsStore = BdApi.Webpack.getModule(BdApi.Webpack.Filters.byKeys("getActiveJoinedThreadsForGuild"));
                 if (ActiveThreadsStore) {
-                    const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.DREAMA_SERVER_ID);
+                    const activeThreads = ActiveThreadsStore.getActiveJoinedThreadsForGuild(CONFIG.REAPA_SERVER_ID);
                     if (activeThreads) {
                         // The structure is { parentChannelId: { threadId: { channel: {...}, joinTimestamp: ... } } }
                         for (const parentChannelId of Object.keys(activeThreads)) {
@@ -626,11 +626,11 @@ function GodpackForwarder(meta) {
 
                 threadsWithMessages++;
 
-                // Filter messages from Dreama with @everyone that are newer than last forwarded
+                // Filter messages from Reapa with @everyone that are newer than last forwarded
                 for (const msg of messagesArray) {
                     const msgTimestamp = new Date(msg.timestamp).getTime();
 
-                    if (msgTimestamp > currentSettings.lastForwardedTimestamp && isDreamaEveryonePing(msg)) {
+                    if (msgTimestamp > currentSettings.lastForwardedTimestamp && isReapaEveryonePing(msg)) {
                         // Check if user is a member of this thread
                         if (!(await isUserInThread(thread.id))) {
                             continue;
@@ -856,8 +856,8 @@ function GodpackForwarder(meta) {
             `;
             infoBox.innerHTML = `
                 <strong style="color: var(--text-normal);">📌 Important:</strong><br>
-                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where Dreama runs.</span><br>
-                <span style="color: var(--text-normal);">• Catch-up scans all channels in the Dreama server for missed @everyone pings.</span><br>
+                <span style="color: var(--text-normal);">• The forward channel must be in a different server than where Reapa runs.</span><br>
+                <span style="color: var(--text-normal);">• Catch-up scans all channels in the Reapa server for missed @everyone pings.</span><br>
                 <span style="color: var(--text-normal);">• Channels must be recently viewed in Discord for catch-up to find messages.</span>
             `;
             panel.appendChild(infoBox);
